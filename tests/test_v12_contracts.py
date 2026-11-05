@@ -151,6 +151,18 @@ class StateTests(unittest.TestCase):
         self.assertFalse(complete)
 
 
+    def test_cache_with_invalid_ohlc_is_not_trusted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=os.path.join(folder,"bad-ohlc.json")
+            with open(path,"w",encoding="utf-8") as stream:
+                json.dump({"version":2,"complete":True,"candles":[{
+                    "timestamp_ms":0,"open":10,"high":9,"low":8,"close":10,"closed":True
+                }]},stream)
+            data,complete=_read_cache(path,3600000)
+        self.assertEqual(data,{})
+        self.assertFalse(complete)
+
+
 class ScannerInputTests(unittest.TestCase):
     def test_frame_excludes_unclosed_candles(self):
         rows = [

@@ -3,6 +3,7 @@ import json
 import math
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,11 +12,41 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pandas as pd
 from signal_rules import _ema, detect_signals
 from v12 import bitget
-from v12.config import SYMBOLS, TIMEFRAMES
+from v12.config import SCAN_WORKERS, SYMBOLS, TIMEFRAMES
 
 OUTPUT = Path(os.environ.get("V12_BATCH_REPORT", "artifacts/v12-batch-validation.json"))
 CACHE = Path(os.environ.get("V12_BATCH_CACHE", ".cache/v12-batch-validation"))
 REQUIRED = {"1H": (12,), "4H": (144, 169, 576, 676)}
+
+
+def fetch_history(pair):
+    """Fetch and validate one pair; Bitget's global throttle controls request pacing."""
+    symbol, timeframe = pair
+    print(f"[V12 BATCH] {symbol} {timeframe}", flush=True)
+    try:
+        rows = bitget.fetch_candles(symbol, timeframe)
+        closed = [row for row in rows if row.get("closed")]
+        gaps = bitget._validate(rows, TIMEFRAMES[timeframe], f"{symbol} {timeframe}")
+        cached, cache_complete = bitget._read_cache(
+            bitget._path(symbol, timeframe), TIMEFRAMES[timeframe]
+        )
+        cache_matches = cache_complete and len(cached) == len(rows)
+        check = {
+            "symbol": symbol, "timeframe": timeframe,
+            "candles_total": len(rows), "candles_closed": len(closed),
+            "cache_complete": bool(cache_complete), "cache_matches": bool(cache_matches),
+            "oldest_timestamp_ms": int(rows[0]["timestamp_ms"]),
+            "newest_timestamp_ms": int(rows[-1]["timestamp_ms"]),
+            "gap_count": len(gaps), "ema": {},
+        }
+        errors = []
+        if not cache_matches:
+            errors.append(f"{symbol} {timeframe}: cache is incomplete or does not match fetched history")
+        if gaps:
+            errors.append(f"{symbol} {timeframe}: {len(gaps)} candle gaps")
+        return check, closed, errors
+    except Exception as exc:
+        return None, None, [f"{symbol} {timeframe}: {type(exc).__name__}: {exc}"]
 
 
 def main():
@@ -23,44 +54,30 @@ def main():
     bitget.CACHE_DIR = str(CACHE)
     started = datetime.now(timezone.utc)
     history, checks, errors = {}, [], []
+    pairs = [(symbol, timeframe) for symbol in SYMBOLS for timeframe in ("1H", "4H")]
 
-    for symbol in SYMBOLS:
-        for timeframe in ("1H", "4H"):
-            print(f"[V12 BATCH] {symbol} {timeframe}", flush=True)
-            try:
-                rows = bitget.fetch_candles(symbol, timeframe)
-                closed = [row for row in rows if row.get("closed")]
-                gaps = bitget._validate(rows, TIMEFRAMES[timeframe], f"{symbol} {timeframe}")
-                cached, cache_complete = bitget._read_cache(bitget._path(symbol, timeframe), TIMEFRAMES[timeframe])
-                cache_matches = cache_complete and len(cached) == len(rows)
-                if not cache_matches:
-                    errors.append(f"{symbol} {timeframe}: cache is incomplete or does not match fetched history")
-                closes = pd.Series([float(row["close"]) for row in closed], dtype="float64")
-                ema_checks = {}
-                for span in REQUIRED[timeframe]:
-                    values = _ema(closes, span)
-                    first = values.first_valid_index()
-                    latest = float(values.iloc[-1]) if len(values) and pd.notna(values.iloc[-1]) else None
-                    ok = len(closed) >= span and first == span - 1 and latest is not None and math.isfinite(latest)
-                    ema_checks[str(span)] = {
-                        "bars_required": span, "closed_bars": len(closed),
-                        "first_valid_index": first, "latest_value": latest, "passed": bool(ok),
-                    }
-                    if not ok:
-                        errors.append(f"{symbol} {timeframe} EMA{span}: warmup or latest value failed")
-                if gaps:
-                    errors.append(f"{symbol} {timeframe}: {len(gaps)} candle gaps")
-                checks.append({
-                    "symbol": symbol, "timeframe": timeframe,
-                    "candles_total": len(rows), "candles_closed": len(closed),
-                    "cache_complete": bool(cache_complete), "cache_matches": bool(cache_matches),
-                    "oldest_timestamp_ms": int(rows[0]["timestamp_ms"]),
-                    "newest_timestamp_ms": int(rows[-1]["timestamp_ms"]),
-                    "gap_count": len(gaps), "ema": ema_checks,
-                })
-                history[(symbol, timeframe)] = closed
-            except Exception as exc:
-                errors.append(f"{symbol} {timeframe}: {type(exc).__name__}: {exc}")
+    # Workers overlap network latency; bitget._slot still enforces the exchange request interval.
+    with ThreadPoolExecutor(max_workers=min(SCAN_WORKERS, len(pairs))) as pool:
+        fetched = list(pool.map(fetch_history, pairs))
+
+    for (symbol, timeframe), (check, closed, item_errors) in zip(pairs, fetched):
+        errors.extend(item_errors)
+        if check is None:
+            continue
+        closes = pd.Series([float(row["close"]) for row in closed], dtype="float64")
+        for span in REQUIRED[timeframe]:
+            values = _ema(closes, span)
+            first = values.first_valid_index()
+            latest = float(values.iloc[-1]) if len(values) and pd.notna(values.iloc[-1]) else None
+            ok = len(closed) >= span and first == span - 1 and latest is not None and math.isfinite(latest)
+            check["ema"][str(span)] = {
+                "bars_required": span, "closed_bars": len(closed),
+                "first_valid_index": first, "latest_value": latest, "passed": bool(ok),
+            }
+            if not ok:
+                errors.append(f"{symbol} {timeframe} EMA{span}: warmup or latest value failed")
+        checks.append(check)
+        history[(symbol, timeframe)] = closed
 
     signal_results = []
     if len(history) == len(SYMBOLS) * 2:
