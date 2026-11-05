@@ -1,0 +1,29 @@
+name: V12 Batch 1+2 Read-only Validation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies and run complete test suite
+        run: python -m pip install -r requirements.txt && python -m compileall -q v12 signal_rules.py tests scripts && python -m unittest discover -s tests -v
+      - name: Validate Bitget history, EMA warmup and signal-rule execution
+        env:
+          V12_BATCH_CACHE: .cache/v12-batch-validation
+          V12_BATCH_REPORT: artifacts/v12-batch-validation.json
+        run: python scripts/v12_batch_validation.py
+      - name: Upload read-only validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v12-batch-validation-report
+          path: artifacts/v12-batch-validation.json
+          if-no-files-found: warn
+          retention-days: 14
