@@ -1,9 +1,6 @@
 name: V12 Batch 1+2 Read-only Validation
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - v12/second-batch-optimization
 permissions:
   contents: read
 concurrency:
