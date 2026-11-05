@@ -1,4 +1,4 @@
-"""Read-only live Bitget history validation for a small V12 sample.
+"""Read-only live Bitget history validation for the full V12 contract pool.
 
 This deliberately does not run signal detection, change signal state, send Bark,
 or enable the scheduled scanner. Candle cache is isolated under the runner's
