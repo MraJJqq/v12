@@ -5,7 +5,6 @@ permissions:
   contents: read
 jobs:
   bark-test:
-    if: vars.V12_ENABLED == 'true' && vars.V12_LAUNCH_APPROVED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
