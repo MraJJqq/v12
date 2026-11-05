@@ -87,5 +87,34 @@ class RuntimeSimulationTests(unittest.TestCase):
             self.assertEqual(sent[0], "美股巨头\n▰ No change ▰\n\n核心能源\n▰ No change ▰")
 
 
+    def test_end_to_end_scan_report_to_bark_uses_mocked_transport(self):
+        with tempfile.TemporaryDirectory() as folder:
+            signal_state_path = os.path.join(folder, "signal-state.json")
+            report_path = os.path.join(folder, "scan-report.json")
+            bark_state_path = os.path.join(folder, "bark-state.json")
+            pending_path = os.path.join(folder, "bark-pending.json")
+            row = self.candle(1793836800000)
+
+            with patch.object(scanner, "STATE_PATH", signal_state_path), \
+                 patch.object(scanner, "fetch_candles", return_value=[row]), \
+                 patch.object(scanner, "detect_signals",
+                              return_value=pd.DataFrame(columns=["time", "direction", "tunnels"])):
+                report = scanner.scan_market_data()
+
+            with open(report_path, "w", encoding="utf-8") as stream:
+                json.dump(report, stream)
+
+            sent = []
+            with patch.object(bark, "BARK_STATE_PATH", bark_state_path), \
+                 patch.object(bark, "BARK_PENDING_PATH", pending_path), \
+                 patch.object(bark, "_send", side_effect=lambda body, key: sent.append(body)):
+                self.assertEqual(bark.send_report(report_path), 0)
+                self.assertEqual(bark.send_report(report_path), 0)
+
+            self.assertEqual(report["scan_status"], "complete")
+            self.assertEqual(len(sent), 1)
+            self.assertIn("▰ No change ▰", sent[0])
+
+
 if __name__ == "__main__":
     unittest.main()
