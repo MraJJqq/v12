@@ -1,5 +1,6 @@
 """Read-only V12 full-pool EMA and signal-rule validation."""
 import json
+import math
 import os
 import sys
 from datetime import datetime, timezone
@@ -30,16 +31,20 @@ def main():
                 rows = bitget.fetch_candles(symbol, timeframe)
                 closed = [row for row in rows if row.get("closed")]
                 gaps = bitget._validate(rows, TIMEFRAMES[timeframe], f"{symbol} {timeframe}")
+                cached, cache_complete = bitget._read_cache(bitget._path(symbol, timeframe), TIMEFRAMES[timeframe])
+                cache_matches = cache_complete and len(cached) == len(rows)
+                if not cache_matches:
+                    errors.append(f"{symbol} {timeframe}: cache is incomplete or does not match fetched history")
                 closes = pd.Series([float(row["close"]) for row in closed], dtype="float64")
                 ema_checks = {}
                 for span in REQUIRED[timeframe]:
                     values = _ema(closes, span)
                     first = values.first_valid_index()
-                    ok = len(closed) >= span and first == span - 1 and pd.notna(values.iloc[-1])
+                    latest = float(values.iloc[-1]) if len(values) and pd.notna(values.iloc[-1]) else None
+                    ok = len(closed) >= span and first == span - 1 and latest is not None and math.isfinite(latest)
                     ema_checks[str(span)] = {
                         "bars_required": span, "closed_bars": len(closed),
-                        "first_valid_index": first, "latest_value": float(values.iloc[-1]) if pd.notna(values.iloc[-1]) else None,
-                        "passed": bool(ok),
+                        "first_valid_index": first, "latest_value": latest, "passed": bool(ok),
                     }
                     if not ok:
                         errors.append(f"{symbol} {timeframe} EMA{span}: warmup or latest value failed")
@@ -48,6 +53,7 @@ def main():
                 checks.append({
                     "symbol": symbol, "timeframe": timeframe,
                     "candles_total": len(rows), "candles_closed": len(closed),
+                    "cache_complete": bool(cache_complete), "cache_matches": bool(cache_matches),
                     "oldest_timestamp_ms": int(rows[0]["timestamp_ms"]),
                     "newest_timestamp_ms": int(rows[-1]["timestamp_ms"]),
                     "gap_count": len(gaps), "ema": ema_checks,
