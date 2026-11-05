@@ -59,7 +59,7 @@ def scan_market_data():
     daily=merge_daily_signals(prior,new,day);report["signals"]=daily["signals"]
     report["finished_at"]=datetime.now(TIMEZONE).isoformat()
     report["scan_status"]="complete" if report["symbols_ok"]==report["symbols_total"] else ("partial" if report["symbols_ok"] else "failed")
-    state["__daily_formal_signals__"]=daily;state["__rule_version__"]={"version":11,"source":"signal_rules.py"}
+    state["__daily_formal_signals__"]=daily;state["__rule_version__"]={"version":12,"source":"signal_rules.py"}
     save_signal_state(STATE_PATH,state)
     return report
 def scan_exit_code(report):
