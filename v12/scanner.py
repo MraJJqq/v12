@@ -98,5 +98,7 @@ def main():
     report=scan_market_data();rendered=json.dumps(report,ensure_ascii=False,indent=2);print(rendered)
     path=os.environ.get("V12_REPORT_PATH",REPORT_PATH);os.makedirs(os.path.dirname(path) or ".",exist_ok=True)
     with open(path,"w",encoding="utf-8") as f:f.write(rendered+"\n")
+    if scan_exit_code(report)==0:
+        publish_public_feed(report)
     return scan_exit_code(report)
 if __name__=="__main__":sys.exit(main())
