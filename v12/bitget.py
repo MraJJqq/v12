@@ -103,11 +103,49 @@ def _read_cache(path,interval):
     except (OSError,ValueError,TypeError,KeyError,json.JSONDecodeError,BitgetError): return {},False
 
 def _save(path,rows,complete):
-    os.makedirs(os.path.dirname(path),exist_ok=True); tmp=path+".tmp"
+    os.makedirs(os.path.dirname(path),exist_ok=True)
+    payload={"version":2,"complete":bool(complete),"candles":rows}
+    # Avoid rewriting an unchanged cache file; retain atomic replacement on changes.
+    try:
+        with open(path,encoding="utf-8") as existing:
+            if json.load(existing) == payload:
+                return
+    except (OSError,ValueError,TypeError):
+        pass
+    tmp=path+".tmp"
     with open(tmp,"w",encoding="utf-8") as f:
-        json.dump({"version":2,"complete":bool(complete),"candles":rows},f,separators=(",",":"))
+        json.dump(payload,f,separators=(",",":"))
         f.flush(); os.fsync(f.fileno())
     os.replace(tmp,path)
+
+def _repair_gaps(data, symbol, tf, interval):
+    """Backfill missing intervals between cached candles; fail closed if unavailable."""
+    for _ in range(MAX_HISTORY_PAGES):
+        gaps=_validate(list(data.values()),interval,f"{symbol} {tf} gap repair")
+        if not gaps:
+            return
+        progressed=False
+        for previous, following in gaps:
+            cursor=following
+            while cursor-previous > interval:
+                page=_page(symbol,tf,cursor)
+                additions=[row for row in page if previous < int(row["timestamp_ms"]) < cursor]
+                if not additions:
+                    break
+                before=len(data)
+                _merge(data,additions)
+                progressed = progressed or len(data)>before
+                next_cursor=min(int(row["timestamp_ms"]) for row in additions)
+                if next_cursor >= cursor:
+                    break
+                cursor=next_cursor
+        if not progressed:
+            remaining=_validate(list(data.values()),interval,f"{symbol} {tf} unresolved gaps")
+            first,last=remaining[0] if remaining else (None,None)
+            raise BitgetError(
+                f"Unrepairable {tf} history gap for {symbol}: {first} -> {last}"
+            )
+    raise BitgetError(f"{tf} gap repair exceeded safety page cap for {symbol}")
 
 def _page(symbol,tf,end=None):
     interval=TIMEFRAMES[tf]
@@ -167,7 +205,13 @@ def fetch_candles(symbol,tf):
             raise
     rows=sorted(data.values(),key=lambda x:x["timestamp_ms"])
     if not rows: raise BitgetError(f"No {tf} history available for {symbol}")
-    _validate(rows,interval,f"{symbol} full history")
+    try:
+        _repair_gaps(data,symbol,tf,interval)
+    except Exception:
+        partial=sorted(data.values(),key=lambda x:x["timestamp_ms"])
+        if partial: _save(path,partial,False)
+        raise
+    rows=sorted(data.values(),key=lambda x:x["timestamp_ms"])
     now=int(time.time()*1000)
     for row in rows: row["closed"]=row["timestamp_ms"]+interval<=now
     _save(path,rows,done)
