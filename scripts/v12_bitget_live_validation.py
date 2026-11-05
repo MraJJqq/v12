@@ -14,9 +14,9 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from v12 import bitget
-from v12.config import TIMEFRAMES
+from v12.config import SYMBOLS, TIMEFRAMES
 
-SAMPLE_SYMBOLS = ("BTCUSDT", "NVDAUSDT", "XAUUSDT")
+VALIDATION_SYMBOLS = SYMBOLS
 OUTPUT = Path(os.environ.get("V12_VALIDATION_REPORT", "artifacts/v12-bitget-live-validation.json"))
 CACHE = Path(os.environ.get("V12_VALIDATION_CACHE", ".cache/v12-live-validation-candles"))
 
@@ -90,7 +90,7 @@ def main():
     started = datetime.now(timezone.utc)
     checks = []
     # Serial execution intentionally respects the exchange request throttle.
-    for symbol in SAMPLE_SYMBOLS:
+    for symbol in VALIDATION_SYMBOLS:
         for timeframe in ("1H", "4H"):
             print(f"[LIVE VALIDATION] {symbol} {timeframe}", flush=True)
             item = validate_one(symbol, timeframe)
@@ -107,7 +107,7 @@ def main():
         "data_source": "Bitget Mix USDT-FUTURES",
         "started_at_utc": started.isoformat(),
         "finished_at_utc": datetime.now(timezone.utc).isoformat(),
-        "sample_symbols": list(SAMPLE_SYMBOLS),
+        "symbols": list(VALIDATION_SYMBOLS),
         "timeframes": ["1H", "4H"],
         "checks_total": len(checks),
         "checks_complete": complete,
