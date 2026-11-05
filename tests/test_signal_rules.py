@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 import pandas as pd
+import numpy as np
 import signal_rules
 
 
@@ -13,6 +14,36 @@ class EmaWarmupTests(unittest.TestCase):
                 self.assertTrue(ema.iloc[:span - 1].isna().all())
                 self.assertTrue(pd.notna(ema.iloc[span - 1]))
                 self.assertTrue(pd.notna(ema.iloc[-1]))
+
+    def test_first_valid_value_uses_sma_seed(self):
+        values = pd.Series([10.0, 12.0, 14.0, 16.0, 18.0, 20.0])
+        ema = signal_rules._ema(values, 3)
+        self.assertTrue(ema.iloc[:2].isna().all())
+        self.assertEqual(ema.iloc[2], (10.0 + 12.0 + 14.0) / 3.0)
+
+    def test_v12_matches_v4_sma_seed_and_recursive_formula(self):
+        # Deterministic, varied closes; this mirrors calculateEMA() in V4.
+        values = pd.Series(
+            [100.0 + ((index * 17) % 101) / 10.0 + index * 0.003
+             for index in range(1400)],
+            dtype="float64",
+        )
+        for span in (12, 144, 169, 576, 676):
+            with self.subTest(span=span):
+                alpha = 2.0 / (span + 1.0)
+                expected = [None] * (span - 1)
+                value = sum(values.iloc[:span].tolist()) / span
+                expected.append(value)
+                for close in values.iloc[span:]:
+                    value = close * alpha + value * (1.0 - alpha)
+                    expected.append(value)
+                actual = signal_rules._ema(values, span)
+                np.testing.assert_allclose(
+                    actual.iloc[span - 1:].to_numpy(),
+                    np.asarray(expected[span - 1:], dtype=np.float64),
+                    rtol=0.0,
+                    atol=1e-12,
+                )
 
 
 class SignalRuleBoundaryTests(unittest.TestCase):
