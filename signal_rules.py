@@ -24,8 +24,29 @@ FILTER_SPAN = 12
 
 
 def _ema(s: pd.Series, span: int) -> pd.Series:
-    # min_periods=span：数据不够收敛时不出值，避免假信号
-    return s.ewm(span=span, adjust=False, min_periods=span).mean()
+    """EMA with the same SMA seed and recursive update used by V4.
+
+    The first valid value is the arithmetic mean of the first `span`
+    closes. Subsequent values use alpha=2/(span+1). Earlier positions
+    remain NaN so signal warm-up boundaries are unchanged.
+    """
+    if span < 1:
+        raise ValueError("EMA span must be a positive integer")
+    values = s.to_numpy(dtype=np.float64, copy=False)
+    result = np.full(len(values), np.nan, dtype=np.float64)
+    if len(values) < span:
+        return pd.Series(result, index=s.index, name=s.name)
+
+    # Match V4's ordered sum / span initialization, not pandas ewm's
+    # implicit first-observation seed.
+    value = sum(values[:span]) / span
+    result[span - 1] = value
+    alpha = 2.0 / (span + 1.0)
+    for index in range(span, len(values)):
+        value = values[index] * alpha + value * (1.0 - alpha)
+        result[index] = value
+    return pd.Series(result, index=s.index, name=s.name)
+
 
 def _paired_bounds(ea: pd.Series, eb: pd.Series):
     """A Vegas tunnel is valid only when both of its EMA boundaries are valid."""
