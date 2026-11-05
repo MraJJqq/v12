@@ -1,0 +1,23 @@
+name: V12 Runtime Simulation (No Live Bark)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: v12-runtime-simulation
+  cancel-in-progress: false
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile and run complete regression suite
+        run: python -m compileall -q v12 signal_rules.py tests && python -m unittest discover -s tests -v
