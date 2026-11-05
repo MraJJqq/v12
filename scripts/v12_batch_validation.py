@@ -30,7 +30,16 @@ def fetch_history(pair):
         cached, cache_complete = bitget._read_cache(
             bitget._path(symbol, timeframe), TIMEFRAMES[timeframe]
         )
-        cache_matches = cache_complete and len(cached) == len(rows)
+        row_by_ts = {int(row["timestamp_ms"]): row for row in rows}
+        cache_matches = (
+            cache_complete
+            and set(cached) == set(row_by_ts)
+            and all(
+                all(float(cached[ts][field]) == float(row_by_ts[ts][field])
+                    for field in ("open", "high", "low", "close"))
+                for ts in row_by_ts
+            )
+        )
         check = {
             "symbol": symbol, "timeframe": timeframe,
             "candles_total": len(rows), "candles_closed": len(closed),
