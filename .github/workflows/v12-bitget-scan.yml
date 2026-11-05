@@ -1,0 +1,78 @@
+name: VEGAS V12 Bitget Scan
+run-name: V12 scan (manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: v12-bitget-scan
+  cancel-in-progress: false
+jobs:
+  scan:
+    if: vars.V12_ENABLED == 'true' && vars.V12_LAUNCH_APPROVED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate V12 Bark secret
+        env:
+          V12_BARK_KEY: ${{ secrets.V12_BARK_KEY }}
+        run: test -n "$V12_BARK_KEY" || { echo "::error::V12_BARK_KEY is missing"; exit 1; }
+      - name: Restore Bitget history cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/v12-candles
+          key: v12-candle-cache-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: v12-candle-cache-
+      - name: Install dependencies and run tests
+        run: python -m pip install -r requirements.txt && python -m compileall -q v12 signal_rules.py tests && python -m unittest discover -s tests -v
+      - name: Scan Bitget history
+        id: scan
+        env:
+          V12_REPORT_PATH: v12/scan-report.json
+        run: python -m v12.scanner
+      - name: Save history cache
+        if: always() && steps.scan.outcome != 'skipped'
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/v12-candles
+          key: v12-candle-cache-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Persist signal state
+        if: always() && steps.scan.outcome == 'success'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f v12/.signal-state.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "chore(v12): persist signal state"
+          for attempt in 1 2 3; do git fetch origin main && git rebase origin/main && git push origin HEAD:main && exit 0; done
+          exit 1
+      - name: Send Bark notification
+        id: bark
+        if: always() && steps.scan.outcome == 'success'
+        env:
+          V12_BARK_KEY: ${{ secrets.V12_BARK_KEY }}
+        run: python -m v12.bark v12/scan-report.json
+      - name: Persist Bark state
+        if: always() && steps.bark.outcome != 'skipped' && steps.bark.outcome != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for file in v12/.bark-notification-state.json v12/.bark-pending-notification-state.json; do test ! -f "$file" || git add -f "$file"; done
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "chore(v12): persist Bark state"
+          for attempt in 1 2 3; do git fetch origin main && git rebase origin/main && git push origin HEAD:main && exit 0; done
+          exit 1
+      - name: Upload scan report
+        if: always() && steps.scan.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vegas-v12-bitget-scan-report
+          path: v12/scan-report.json
+          if-no-files-found: warn
+          retention-days: 7

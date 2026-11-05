@@ -1,0 +1,30 @@
+name: V12 Live Bitget History Validation
+run-name: V12 live Bitget history validation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: v12-live-bitget-history-validation
+  cancel-in-progress: false
+jobs:
+  validate-live-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install V12 dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Fetch and validate live Bitget history
+        run: python scripts/v12_bitget_live_validation.py
+      - name: Upload validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v12-live-bitget-history-validation
+          path: artifacts/v12-bitget-live-validation.json
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,52 @@
+name: V12 Bark One-Time Test
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  bark-test:
+    if: vars.V12_ENABLED == 'true' && vars.V12_LAUNCH_APPROVED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Send exactly one Bark test notification
+        env:
+          V12_BARK_KEY: ${{ secrets.V12_BARK_KEY }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.request
+          key = os.environ.get("V12_BARK_KEY", "").strip()
+          if not key:
+              print("ERROR: GitHub Actions secret V12_BARK_KEY is missing.")
+              sys.exit(1)
+          payload = {
+              "device_key": key,
+              "body": "VEGAS V12 Bark 测试通知\n单次连通性测试，不代表正式信号。",
+              "group": "VEGAS V12",
+              "level": "active",
+          }
+          request = urllib.request.Request(
+              "https://api.day.app/push",
+              data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+              headers={"Content-Type": "application/json", "User-Agent": "VEGAS-V12-BARK-TEST/1.0"},
+              method="POST",
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  raw = response.read().decode("utf-8", errors="replace")
+                  print(f"Bark HTTP status: {response.status}")
+                  if not 200 <= response.status < 300:
+                      sys.exit(1)
+                  if raw.strip():
+                      result = json.loads(raw)
+                      if isinstance(result, dict) and result.get("code") not in (None, 200, "200"):
+                          print("Bark explicitly rejected the test notification.")
+                          sys.exit(1)
+                  print("Bark test notification accepted.")
+          except Exception as exc:
+              print(f"Bark test failed: {exc}")
+              sys.exit(1)
+          PY
