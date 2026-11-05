@@ -1,7 +1,16 @@
 name: VEGAS V12 Bitget Scan
-run-name: V12 scan (manual)
+run-name: V12 scan
 on:
+  schedule:
+    # Beijing time (UTC+8): 08:00, 10:00, 16:00, 20:00, 22:00
+    - cron: "0 0,2,8,12,14 * * *"
   workflow_dispatch:
+    inputs:
+      recovery_slot:
+        description: "Watchdog recovery slot marker (leave empty for manual runs)"
+        required: false
+        type: string
+        default: ""
 permissions:
   contents: write
 concurrency:
