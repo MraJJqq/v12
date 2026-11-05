@@ -7,13 +7,14 @@ from signal_rules import detect_signals
 from .bitget import fetch_candles
 from .config import (
     REPORT_PATH,
+    PUBLIC_FEED_PATH,
     SCAN_WORKERS,
     STATE_PATH,
     SYMBOLS,
     TIMEZONE,
     VERSION,
 )
-from .state import load_signal_state,merge_daily_signals,save_signal_state
+from .state import atomic_write_json,load_signal_state,merge_daily_signals,save_signal_state
 
 def _frame(rows,tf):
     closed=[x for x in rows if x.get("closed")]
@@ -62,11 +63,42 @@ def scan_market_data():
     state["__daily_formal_signals__"]=daily;state["__rule_version__"]={"version":12,"source":"signal_rules.py"}
     save_signal_state(STATE_PATH,state)
     return report
+def build_public_feed(report):
+    """Build the stable, public V12 snapshot consumed by the V4 bottom ticker."""
+    total=len(SYMBOLS)
+    if (report.get("scan_status")!="complete" or
+        report.get("symbols_ok")!=total or report.get("symbols_total")!=total):
+        raise ValueError("Refusing to publish an incomplete V12 scan")
+    signals=report.get("signals")
+    if not isinstance(signals,list):
+        raise ValueError("V12 report signals must be a list")
+    return {
+        "source":"VEGAS V12",
+        "schema_version":1,
+        "signal_day":report.get("signal_day"),
+        "scan_status":"complete",
+        "symbols_ok":total,
+        "symbols_total":total,
+        "symbols":[symbol.removesuffix("USDT") for symbol in SYMBOLS],
+        "signals":[dict(item) for item in signals
+                   if isinstance(item,dict) and item.get("formal_signal") is True],
+        "started_at":report.get("started_at"),
+        "finished_at":report.get("finished_at"),
+        "scan_timeframes":["4H","1H"],
+    }
+def publish_public_feed(report,path=PUBLIC_FEED_PATH):
+    """Publish only a complete 27/27 scan; preserve the previous snapshot otherwise."""
+    if report.get("scan_status")!="complete" or report.get("symbols_ok")!=len(SYMBOLS) or report.get("symbols_total")!=len(SYMBOLS):
+        return False
+    atomic_write_json(path,build_public_feed(report))
+    return True
 def scan_exit_code(report):
     return 0 if report.get("scan_status")=="complete" and report.get("symbols_ok")==report.get("symbols_total") else 1
 def main():
     report=scan_market_data();rendered=json.dumps(report,ensure_ascii=False,indent=2);print(rendered)
     path=os.environ.get("V12_REPORT_PATH",REPORT_PATH);os.makedirs(os.path.dirname(path) or ".",exist_ok=True)
     with open(path,"w",encoding="utf-8") as f:f.write(rendered+"\n")
+    if scan_exit_code(report)==0:
+        publish_public_feed(report)
     return scan_exit_code(report)
 if __name__=="__main__":sys.exit(main())

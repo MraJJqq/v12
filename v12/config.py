@@ -14,6 +14,7 @@ HTTP_MAX_RETRIES=4
 SCAN_WORKERS=4
 STATE_PATH="v12/.signal-state.json"
 REPORT_PATH="v12/scan-report.json"
+PUBLIC_FEED_PATH="v12/public-signals.json"
 CACHE_DIR=".cache/v12-candles"
 BARK_STATE_PATH="v12/.bark-notification-state.json"
 BARK_PENDING_PATH="v12/.bark-pending-notification-state.json"
