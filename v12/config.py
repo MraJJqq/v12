@@ -1,5 +1,5 @@
 from zoneinfo import ZoneInfo
-VERSION="11.0.0"
+VERSION="12.0.0"
 TIMEZONE=ZoneInfo("Asia/Shanghai")
 BITGET_BASE_URL="https://api.bitget.com"
 PRODUCT_TYPE="USDT-FUTURES"
