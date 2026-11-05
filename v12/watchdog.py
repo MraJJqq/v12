@@ -32,12 +32,20 @@ def _issue(items,title):
 def _created(item):
     return datetime.fromisoformat(item["created_at"].replace("Z","+00:00"))
 
-def _later_success(runs,failed):
+def _later_success(runs,failed,slot_end,marker):
+    """Only a later success for this same slot can supersede its failed scan."""
     start=_created(failed)
-    return any(item is not failed and item.get("status")=="completed"
-        and item.get("conclusion")=="success"
-        and item.get("event") in {"schedule","workflow_dispatch"}
-        and _created(item)>start for item in runs)
+    for item in runs:
+        if item is failed or item.get("status")!="completed" or item.get("conclusion")!="success":
+            continue
+        created=_created(item)
+        if created<=start:
+            continue
+        if item.get("event")=="schedule" and created<slot_end:
+            return True
+        if item.get("event")=="workflow_dispatch" and marker in (item.get("display_title") or ""):
+            return True
+    return False
 
 def _close_lock(api,issues,lock):
     _request(api+f"/issues/{lock['number']}","PATCH",{"state":"closed"})
@@ -101,7 +109,9 @@ def main(now=None):
             pending.append(f"Beijing {hour:02d}:00 scan is running.")
             continue
         if lock: _close_lock(api,issues,lock)
-        if latest.get("conclusion")!="success" and not _later_success(runs,latest):
+        if latest.get("conclusion")!="success" and not _later_success(
+            runs, latest, utc_end-timedelta(minutes=WATCHDOG_GRACE_MINUTES), marker
+        ):
             if not is_recovery:
                 pending.append(_dispatch(api,issues,marker,slot))
             else:
