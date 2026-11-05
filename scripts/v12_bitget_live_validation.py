@@ -1,4 +1,4 @@
-"""Read-only live Bitget history validation for a small V12 sample.
+"""Read-only live Bitget history validation for the full V12 contract pool.
 
 This deliberately does not run signal detection, change signal state, send Bark,
 or enable the scheduled scanner. Candle cache is isolated under the runner's
@@ -7,16 +7,26 @@ temporary workspace and only the compact JSON report is uploaded.
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import local
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from v12 import bitget
-from v12.config import SYMBOLS, TIMEFRAMES
+from v12.config import SCAN_WORKERS, SYMBOLS, TIMEFRAMES
 
 VALIDATION_SYMBOLS = SYMBOLS
+_PAGE_COUNTER = local()
+_ORIGINAL_PAGE = bitget._page
+
+
+def _counted_page(*args, **kwargs):
+    _PAGE_COUNTER.calls = getattr(_PAGE_COUNTER, "calls", 0) + 1
+    return _ORIGINAL_PAGE(*args, **kwargs)
+
 OUTPUT = Path(os.environ.get("V12_VALIDATION_REPORT", "artifacts/v12-bitget-live-validation.json"))
 CACHE = Path(os.environ.get("V12_VALIDATION_CACHE", ".cache/v12-live-validation-candles"))
 
@@ -26,15 +36,7 @@ def iso_ms(value):
 
 
 def validate_one(symbol, timeframe):
-    calls = 0
-    original_page = bitget._page
-
-    def counted_page(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        return original_page(*args, **kwargs)
-
-    bitget._page = counted_page
+    _PAGE_COUNTER.calls = 0
     started = time.monotonic()
     result = {
         "symbol": symbol,
@@ -77,8 +79,7 @@ def validate_one(symbol, timeframe):
                 "partial_newest_utc": iso_ms(timestamps[-1]) if timestamps else None,
             })
     finally:
-        bitget._page = original_page
-        result["page_requests"] = calls
+        result["page_requests"] = _PAGE_COUNTER.calls
         result["elapsed_seconds"] = round(time.monotonic() - started, 2)
     return result
 
@@ -88,14 +89,18 @@ def main():
     # Isolate validation cache from the normal V12 scanner cache.
     bitget.CACHE_DIR = str(CACHE)
     started = datetime.now(timezone.utc)
-    checks = []
-    # Serial execution intentionally respects the exchange request throttle.
-    for symbol in VALIDATION_SYMBOLS:
-        for timeframe in ("1H", "4H"):
-            print(f"[LIVE VALIDATION] {symbol} {timeframe}", flush=True)
-            item = validate_one(symbol, timeframe)
-            checks.append(item)
-            print(json.dumps(item, ensure_ascii=False), flush=True)
+    pairs = [(symbol, timeframe) for symbol in VALIDATION_SYMBOLS for timeframe in ("1H", "4H")]
+    original_page = bitget._page
+    bitget._page = _counted_page
+    try:
+        # Thread-local counters preserve per-pair request totals while Bitget's global throttle remains active.
+        with ThreadPoolExecutor(max_workers=min(SCAN_WORKERS, len(pairs))) as pool:
+            checks = list(pool.map(lambda pair: validate_one(*pair), pairs))
+    finally:
+        bitget._page = original_page
+    for item in checks:
+        print(f"[LIVE VALIDATION] {item['symbol']} {item['timeframe']}", flush=True)
+        print(json.dumps(item, ensure_ascii=False), flush=True)
 
     complete = sum(item["status"] == "complete" for item in checks)
     report = {

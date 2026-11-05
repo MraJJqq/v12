@@ -86,7 +86,17 @@ def _read_cache(path,interval):
             not isinstance(row, dict) or "timestamp_ms" not in row for row in rows
         ):
             return {}, False
-        data={int(x["timestamp_ms"]):x for x in rows}
+        data={}
+        for row in rows:
+            if not isinstance(row, dict):
+                return {}, False
+            parsed=_parse_row(
+                [row.get("timestamp_ms"), row.get("open"), row.get("high"),
+                 row.get("low"), row.get("close")],
+                "cache",
+            )
+            parsed["closed"]=bool(row.get("closed", False))
+            data[parsed["timestamp_ms"]]=parsed
         if len(data)!=len(rows): return {},False
         _validate(list(data.values()),interval,"cache")
         return data,payload.get("version") == 2 and payload.get("complete") is True
