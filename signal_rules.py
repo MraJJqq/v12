@@ -27,12 +27,6 @@ def _ema(s: pd.Series, span: int) -> pd.Series:
     # min_periods=span：数据不够收敛时不出值，避免假信号
     return s.ewm(span=span, adjust=False, min_periods=span).mean()
 
-def _paired_bounds(ea: pd.Series, eb: pd.Series):
-    """A Vegas tunnel is valid only when both of its EMA boundaries are valid."""
-    valid = ea.notna() & eb.notna()
-    bounds = pd.concat([ea, eb], axis=1)
-    return bounds.min(axis=1).where(valid), bounds.max(axis=1).where(valid)
-
 
 def detect_signals(df_4h: pd.DataFrame, df_1h: pd.DataFrame, rearm: bool = True) -> pd.DataFrame:
     """
@@ -46,7 +40,8 @@ def detect_signals(df_4h: pd.DataFrame, df_1h: pd.DataFrame, rearm: bool = True)
     d4["avail"] = d4["open_time"] + pd.Timedelta(hours=4)
     for name, (a, b) in TUNNELS.items():
         ea, eb = _ema(d4["close"], a), _ema(d4["close"], b)
-        d4[f"{name}_lo"], d4[f"{name}_hi"] = _paired_bounds(ea, eb)
+        d4[f"{name}_lo"] = pd.concat([ea, eb], axis=1).min(axis=1)
+        d4[f"{name}_hi"] = pd.concat([ea, eb], axis=1).max(axis=1)
 
     # 1H 过滤线
     d1["ema12"] = _ema(d1["close"], FILTER_SPAN)
