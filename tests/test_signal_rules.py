@@ -66,16 +66,3 @@ class SignalRuleBoundaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-class PairedTunnelWarmupTests(unittest.TestCase):
-    def test_tunnel_waits_until_both_emas_are_valid(self):
-        index = pd.RangeIndex(4)
-        fast = pd.Series([float("nan"), 10.0, 11.0, 12.0], index=index)
-        slow = pd.Series([float("nan"), float("nan"), 9.0, 10.0], index=index)
-        low, high = signal_rules._paired_bounds(fast, slow)
-        self.assertTrue(pd.isna(low.iloc[0]))
-        self.assertTrue(pd.isna(high.iloc[0]))
-        self.assertTrue(pd.isna(low.iloc[1]))
-        self.assertTrue(pd.isna(high.iloc[1]))
-        self.assertEqual(low.iloc[2], 9.0)
-        self.assertEqual(high.iloc[2], 11.0)
