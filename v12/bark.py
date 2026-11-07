@@ -25,7 +25,7 @@ def _norm(value):
 
 def build_body(report):
     found={_norm(x.get("symbol")) for x in report.get("signals",[]) if isinstance(x,dict) and x.get("formal_signal") is True}
-    stocks=[x for x in STOCK_SYMBOLS if x in found]; core=[x for x in CORE_SYMBOLS if x in found]
+    stocks=[x for x in STOCK_SYMBOLS if _norm("SKHYUSDT" if x=="SKHYNIX" else x) in found]; core=[x for x in CORE_SYMBOLS if x in found]
     stock_text="\n".join("   ".join(f"▰ {x} ▰" for x in stocks[i:i+3]) for i in range(0,len(stocks),3)) if stocks else "▰ No change ▰"
     body="美股巨头\n"+stock_text+"\n\n核心能源\n"+("   ".join(f"▰ {x} ▰" for x in core) if core else "▰ No change ▰")
     return body,stocks+core
