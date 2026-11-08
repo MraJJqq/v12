@@ -42,7 +42,7 @@ def _wrap_symbol_units(symbols):
             current = candidate
     if current:
         lines.append(current)
-    return "\\n".join(lines) if lines else "▰ No change ▰"
+    return "\n".join(lines) if lines else "▰ No change ▰"
 
 
 def build_body(report):
@@ -50,7 +50,7 @@ def build_body(report):
     stocks=[x for x in STOCK_SYMBOLS if _norm("SKHYUSDT" if x=="SKHYNIX" else x) in found]; core=[x for x in CORE_SYMBOLS if x in found]
     stock_text = _wrap_symbol_units(stocks)
     core_text = _wrap_symbol_units(core)
-    body="美股巨头\\n"+stock_text+"\\n\\n核心能源\\n"+core_text
+    body="美股巨头\n"+stock_text+"\n\n核心能源\n"+core_text
     return body,stocks+core
 
 def _date(report):
