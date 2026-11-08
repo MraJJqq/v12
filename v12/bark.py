@@ -23,11 +23,34 @@ def _norm(value):
     symbol=str(value or "").strip().upper()
     return symbol[:-4] if symbol.endswith("USDT") else symbol
 
+# Bark delivers plain text and cannot detect the receiving device's screen width.
+# Wrap whole symbol tokens at a conservative, fixed display-column width.
+_BARK_LINE_WIDTH = 32
+_BARK_TOKEN_SEPARATOR = "   "
+
+
+def _wrap_symbol_units(symbols):
+    lines = []
+    current = ""
+    for symbol in symbols:
+        unit = f"▰ {symbol} ▰"
+        candidate = unit if not current else current + _BARK_TOKEN_SEPARATOR + unit
+        if current and len(candidate) > _BARK_LINE_WIDTH:
+            lines.append(current)
+            current = unit
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return "\\n".join(lines) if lines else "▰ No change ▰"
+
+
 def build_body(report):
     found={_norm(x.get("symbol")) for x in report.get("signals",[]) if isinstance(x,dict) and x.get("formal_signal") is True}
     stocks=[x for x in STOCK_SYMBOLS if _norm("SKHYUSDT" if x=="SKHYNIX" else x) in found]; core=[x for x in CORE_SYMBOLS if x in found]
-    stock_text="\n".join("   ".join(f"▰ {x} ▰" for x in stocks[i:i+3]) for i in range(0,len(stocks),3)) if stocks else "▰ No change ▰"
-    body="美股巨头\n"+stock_text+"\n\n核心能源\n"+("   ".join(f"▰ {x} ▰" for x in core) if core else "▰ No change ▰")
+    stock_text = _wrap_symbol_units(stocks)
+    core_text = _wrap_symbol_units(core)
+    body="美股巨头\\n"+stock_text+"\\n\\n核心能源\\n"+core_text
     return body,stocks+core
 
 def _date(report):
