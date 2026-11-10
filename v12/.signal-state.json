@@ -1,1 +1,1 @@
-{"__daily_formal_signals__":{"date":"2026-11-10","signals":[]},"__rule_version__":{"version":12,"source":"signal_rules.py"}}
+{"__daily_formal_signals__":{"date":"2026-11-10","signals":[{"symbol":"QCOMUSDT","formal_signal":true,"candle_timestamp_ms":1794272400000,"filter_side":"空","tunnels":["中锋"]}]},"__rule_version__":{"version":12,"source":"signal_rules.py"}}
