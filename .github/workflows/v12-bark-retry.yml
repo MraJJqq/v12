@@ -48,6 +48,10 @@ jobs:
         run: python -m v12.bark --retry-pending
       - name: Process queued Watchdog Bark alerts
         if: always() && steps.retry.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          V12_BARK_KEY: ${{ secrets.V12_BARK_KEY }}
         run: python -m v12.bark --process-watchdog-issues
       - name: Persist retry state
         if: always() && steps.retry.outcome != 'skipped'
