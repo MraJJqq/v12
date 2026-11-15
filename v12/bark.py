@@ -300,9 +300,64 @@ def send_report(path):
     except Exception as exc:
         print(f"ERROR: V12 Bark notification failed: {exc}",file=sys.stderr); return 1
 
+
+def _github_request(path,method="GET",payload=None):
+    repo=os.environ.get("GITHUB_REPOSITORY","").strip()
+    token=os.environ.get("GH_TOKEN","").strip()
+    if repo.count("/")!=1 or not token:
+        raise RuntimeError("GITHUB_REPOSITORY and GH_TOKEN are required to process Watchdog alerts.")
+    url=f"https://api.github.com/repos/{repo}{path}"
+    data=None if payload is None else json.dumps(payload).encode()
+    headers={"Accept":"application/vnd.github+json","Authorization":"Bearer "+token,
+        "X-GitHub-Api-Version":"2022-11-28"}
+    if payload is not None: headers["Content-Type"]="application/json"
+    request=urllib.request.Request(url,data=data,headers=headers,method=method)
+    with urllib.request.urlopen(request,timeout=20) as response:
+        raw=response.read()
+        return json.loads(raw) if raw else None
+
+
+def process_watchdog_issues():
+    """Send and close Watchdog alert issues only from the serialized Bark retry worker."""
+    issues=_github_request("/issues?state=open&per_page=100") or []
+    key=os.environ.get("V12_BARK_KEY","").strip()
+    failed=False
+    for issue in issues:
+        if issue.get("pull_request") or issue.get("title")!="[V12 Watchdog] Scan health alert":
+            continue
+        number=issue.get("number")
+        if not number:
+            continue
+        day=datetime.now(TIMEZONE).date().isoformat()
+        fingerprint=hashlib.sha256(f"watchdog\n{day}\n{number}".encode()).hexdigest()
+        if _accepted(fingerprint,day,BARK_WATCHDOG_STATE_PATH):
+            _github_request(f"/issues/{number}","PATCH",{"state":"closed"})
+            print(f"Watchdog alert issue #{number} closed after Bark acceptance.")
+            continue
+        queued=any(item.get("fingerprint")==fingerprint for item in _pending_queue())
+        if not queued:
+            try:
+                send_watchdog_alert(str(issue.get("body") or "V12 watchdog scan health alert"),key,number)
+            except Exception as exc:
+                failed=True
+                print(f"ERROR: Watchdog Bark alert #{number} remains queued or failed: {exc}",file=sys.stderr)
+                continue
+        if _accepted(fingerprint,day,BARK_WATCHDOG_STATE_PATH):
+            _github_request(f"/issues/{number}","PATCH",{"state":"closed"})
+            print(f"Watchdog alert issue #{number} closed after Bark acceptance.")
+        else:
+            print(f"Watchdog alert issue #{number} remains open until Bark acceptance.")
+    return 1 if failed else 0
+
 if __name__=="__main__":
     if len(sys.argv)>1 and sys.argv[1]=="--retry-pending":
         sys.exit(retry_pending())
+    if len(sys.argv)>1 and sys.argv[1]=="--process-watchdog-issues":
+        try:
+            sys.exit(process_watchdog_issues())
+        except Exception as exc:
+            print(f"ERROR: Watchdog Bark issue processing failed: {exc}",file=sys.stderr)
+            sys.exit(1)
     if len(sys.argv)>1 and sys.argv[1]=="--test":
         try:
             send_test_notification()

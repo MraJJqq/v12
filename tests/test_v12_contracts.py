@@ -224,6 +224,25 @@ class BarkTests(unittest.TestCase):
             self.assertFalse(os.path.exists(scan_state))
 
 
+    def test_watchdog_issue_alert_is_sent_by_retry_worker(self):
+        from datetime import datetime
+        from v12 import bark
+        from v12.config import TIMEZONE
+        with tempfile.TemporaryDirectory() as folder:
+            pending_path=os.path.join(folder,"pending.json")
+            scan_state=os.path.join(folder,"scan-state.json")
+            watchdog_state=os.path.join(folder,"watchdog-state.json")
+            issue={"number":42,"title":"[V12 Watchdog] Scan health alert","body":"V12 scan failed."}
+            with patch.object(bark,"BARK_PENDING_PATH",pending_path),patch.object(bark,"BARK_STATE_PATH",scan_state),patch.object(bark,"BARK_WATCHDOG_STATE_PATH",watchdog_state),patch.object(bark,"_github_request",side_effect=[[issue],{}]) as api,patch.object(bark,"_send") as send,patch.dict(os.environ,{"GITHUB_REPOSITORY":"MraJJqq/v12","GH_TOKEN":"test","V12_BARK_KEY":"test-key"}):
+                self.assertEqual(bark.process_watchdog_issues(),0)
+                send.assert_called_once_with("V12 scan failed.","test-key")
+                self.assertEqual(api.call_args_list[1].args,("/issues/42","PATCH",{"state":"closed"}))
+            with open(watchdog_state,encoding="utf-8") as stream:
+                accepted=json.load(stream)
+            self.assertEqual(accepted["date"],datetime.now(TIMEZONE).date().isoformat())
+            self.assertFalse(os.path.exists(scan_state))
+
+
 class StatusTests(unittest.TestCase):
     def test_complete(self):
         self.assertEqual(scan_exit_code({"scan_status":"complete","symbols_ok":24,"symbols_total":24}),0)
