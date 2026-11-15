@@ -2,7 +2,6 @@
 import json,os,urllib.request
 from datetime import datetime,timedelta,timezone
 from .config import SCAN_HOURS_BEIJING,TIMEZONE,WATCHDOG_GRACE_MINUTES
-from .bark import send_watchdog_alert
 
 RECOVERY_LOCK_TIMEOUT_MINUTES=15
 
@@ -125,8 +124,6 @@ def main(now=None):
             "body":"V12 scheduled scan health issue.\n\n"+detail
         })
         print(created.get("html_url","V12 watchdog issue created"))
-        key=os.environ.get("V12_BARK_KEY","").strip()
-        if key: send_watchdog_alert(detail, key, created.get("number"))
     elif not problems and alert:
         _request(api+f"/issues/{alert['number']}","PATCH",{"state":"closed"})
     for message in pending: print(message)
