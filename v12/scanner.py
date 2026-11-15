@@ -46,6 +46,10 @@ def scan_market_data():
     started=datetime.now(TIMEZONE);day=started.date().isoformat()
     state=load_signal_state(STATE_PATH);prior=state.get("__daily_formal_signals__",{})
     if not isinstance(prior,dict):prior={}
+    allowed_symbols={symbol.removesuffix("USDT") for symbol in SYMBOLS}
+    prior_signals=prior.get("signals",[])
+    if not isinstance(prior_signals,list):prior_signals=[]
+    prior={**prior,"signals":[item for item in prior_signals if isinstance(item,dict) and str(item.get("symbol","")).strip().upper().removesuffix("USDT") in allowed_symbols]}
     report={"version":VERSION,"started_at":started.isoformat(),"signal_day":day,"source":"Bitget Mix USDT-FUTURES","scan_timeframes":["4H","1H"],"symbols_total":len(SYMBOLS),"symbols_ok":0,"symbols_excluded":0,"scan_status":"running","failed_symbols":[],"results":[],"signals":[]}
     with ThreadPoolExecutor(max_workers=min(SCAN_WORKERS,len(SYMBOLS))) as pool:
         results=list(pool.map(lambda s:_one(s,day),SYMBOLS))
@@ -72,6 +76,7 @@ def build_public_feed(report):
     signals=report.get("signals")
     if not isinstance(signals,list):
         raise ValueError("V12 report signals must be a list")
+    allowed_symbols={symbol.removesuffix("USDT") for symbol in SYMBOLS}
     return {
         "source":"VEGAS V12",
         "schema_version":1,
@@ -81,13 +86,13 @@ def build_public_feed(report):
         "symbols_total":total,
         "symbols":[symbol.removesuffix("USDT") for symbol in SYMBOLS],
         "signals":[dict(item) for item in signals
-                   if isinstance(item,dict) and item.get("formal_signal") is True],
+                   if isinstance(item,dict) and item.get("formal_signal") is True and str(item.get("symbol","")).strip().upper().removesuffix("USDT") in allowed_symbols],
         "started_at":report.get("started_at"),
         "finished_at":report.get("finished_at"),
         "scan_timeframes":["4H","1H"],
     }
 def publish_public_feed(report,path=PUBLIC_FEED_PATH):
-    """Publish only a complete 27/27 scan; preserve the previous snapshot otherwise."""
+    """Publish only a complete scan of the configured V12 pool; preserve the previous snapshot otherwise."""
     if report.get("scan_status")!="complete" or report.get("symbols_ok")!=len(SYMBOLS) or report.get("symbols_total")!=len(SYMBOLS):
         return False
     atomic_write_json(path,build_public_feed(report))

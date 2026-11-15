@@ -9,14 +9,18 @@ def complete_report():
     return {
         "signal_day": "2026-11-05",
         "scan_status": "complete",
-        "symbols_ok": 27,
-        "symbols_total": 27,
+        "symbols_ok": 24,
+        "symbols_total": 24,
         "started_at": "2026-11-05T16:00:00+08:00",
         "finished_at": "2026-11-05T16:04:00+08:00",
         "signals": [
             {"symbol": "AMZNUSDT", "formal_signal": True, "candle_timestamp_ms": 1,
              "filter_side": "多", "tunnels": ["中锋"]},
             {"symbol": "QCOMUSDT", "formal_signal": True, "candle_timestamp_ms": 2,
+             "filter_side": "空", "tunnels": ["红峰"]},
+            {"symbol": "METAUSDT", "formal_signal": True, "candle_timestamp_ms": 3,
+             "filter_side": "多", "tunnels": ["中锋"]},
+            {"symbol": "CBRSUSDT", "formal_signal": True, "candle_timestamp_ms": 4,
              "filter_side": "空", "tunnels": ["红峰"]},
             {"symbol": "BTCUSDT", "formal_signal": False},
         ],
@@ -28,11 +32,12 @@ class PublicFeedTests(unittest.TestCase):
         self.assertEqual(payload["source"], "VEGAS V12")
         self.assertEqual(payload["schema_version"], 1)
         self.assertEqual(payload["scan_status"], "complete")
-        self.assertEqual((payload["symbols_ok"], payload["symbols_total"]), (27, 27))
-        self.assertEqual(len(payload["symbols"]), 27)
+        self.assertEqual((payload["symbols_ok"], payload["symbols_total"]), (24, 24))
+        self.assertEqual(len(payload["symbols"]), 24)
         self.assertEqual(len(set(payload["symbols"])), 27)
         self.assertIn("SKHY", payload["symbols"])
-        self.assertEqual([x["symbol"] for x in payload["signals"]], ["AMZNUSDT", "QCOMUSDT"])
+        self.assertEqual([x["symbol"] for x in payload["signals"]], ["AMZNUSDT"])
+        self.assertFalse({"META","QCOM","CBRS"} & set(payload["symbols"]))
 
     def test_incomplete_scan_is_never_published_or_allowed_to_overwrite(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -41,7 +46,7 @@ class PublicFeedTests(unittest.TestCase):
                 json.dump({"source": "previous"}, stream)
             report = complete_report()
             report["scan_status"] = "partial"
-            report["symbols_ok"] = 26
+            report["symbols_ok"] = 23
             self.assertFalse(publish_public_feed(report, path))
             with open(path, encoding="utf-8") as stream:
                 self.assertEqual(json.load(stream), {"source": "previous"})

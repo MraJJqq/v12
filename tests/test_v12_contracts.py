@@ -7,10 +7,12 @@ from v12.scanner import _frame, scan_exit_code
 from v12.state import atomic_write_json, load_signal_state, merge_daily_signals
 
 class PoolTests(unittest.TestCase):
-    def test_27_contracts(self):
-        self.assertEqual((len(SYMBOLS),len(CORE_SYMBOLS),len(STOCK_SYMBOLS)),(27,4,23))
+    def test_24_contracts(self):
+        self.assertEqual((len(SYMBOLS),len(CORE_SYMBOLS),len(STOCK_SYMBOLS)),(24,4,20))
         self.assertIn("SKHYUSDT",SYMBOLS)
         self.assertNotIn("SKHYNIXUSDT",SYMBOLS)
+        for removed in ("METAUSDT","QCOMUSDT","CBRSUSDT"):
+            self.assertNotIn(removed,SYMBOLS)
 
 class CandleTests(unittest.TestCase):
     def test_valid_row(self):
@@ -59,6 +61,10 @@ class CandleTests(unittest.TestCase):
         self.assertTrue(cache["complete"])
 
 class BarkTests(unittest.TestCase):
+    def test_removed_symbols_are_not_notified(self):
+        _,symbols=build_body({"signals":[{"symbol":x+"USDT","formal_signal":True} for x in ("META","QCOM","CBRS")]})
+        self.assertEqual(symbols,[])
+
     def test_no_change_sections(self):
         body,symbols=build_body({"signals":[]})
         self.assertEqual(symbols,[])
@@ -112,9 +118,9 @@ class BarkTests(unittest.TestCase):
 
 class StatusTests(unittest.TestCase):
     def test_complete(self):
-        self.assertEqual(scan_exit_code({"scan_status":"complete","symbols_ok":27,"symbols_total":27}),0)
+        self.assertEqual(scan_exit_code({"scan_status":"complete","symbols_ok":24,"symbols_total":24}),0)
     def test_partial(self):
-        self.assertEqual(scan_exit_code({"scan_status":"partial","symbols_ok":26,"symbols_total":27}),1)
+        self.assertEqual(scan_exit_code({"scan_status":"partial","symbols_ok":23,"symbols_total":24}),1)
 
 
 

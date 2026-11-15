@@ -109,7 +109,7 @@ def main():
         "scheduled_scanner_enabled": False, "data_source": "Bitget Mix USDT-FUTURES",
         "symbols_total": len(SYMBOLS), "history_checks": len(checks),
         "signal_rule_checks": len(signal_results), "errors": errors,
-        "overall_status": "passed" if not errors and len(checks) == 54 and len(signal_results) == 27 else "failed",
+        "overall_status": "passed" if not errors and len(checks) == len(SYMBOLS) * 2 and len(signal_results) == len(SYMBOLS) else "failed",
         "started_at_utc": started.isoformat(),
         "finished_at_utc": datetime.now(timezone.utc).isoformat(),
         "checks": checks, "signal_results": signal_results,

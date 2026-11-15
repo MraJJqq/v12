@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 
 import pandas as pd
@@ -25,6 +26,14 @@ class RuntimeSimulationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             state_path = os.path.join(folder, "signal-state.json")
             row = self.candle(1793836800000)
+            with open(state_path, "w", encoding="utf-8") as stream:
+                json.dump({"__daily_formal_signals__": {
+                    "date": datetime.now(scanner.TIMEZONE).date().isoformat(),
+                    "signals": [
+                        {"symbol": "QCOMUSDT", "formal_signal": True, "candle_timestamp_ms": 1, "filter_side": "多"},
+                        {"symbol": "AMDUSDT", "formal_signal": True, "candle_timestamp_ms": 2, "filter_side": "多"},
+                    ],
+                }}, stream)
 
             with patch.object(scanner, "STATE_PATH", state_path), \
                  patch.object(scanner, "fetch_candles", return_value=[row]), \
@@ -33,10 +42,10 @@ class RuntimeSimulationTests(unittest.TestCase):
                 report = scanner.scan_market_data()
 
             self.assertEqual(report["scan_status"], "complete")
-            self.assertEqual(report["symbols_total"], 27)
-            self.assertEqual(report["symbols_ok"], 27)
+            self.assertEqual(report["symbols_total"], 24)
+            self.assertEqual(report["symbols_ok"], 24)
             self.assertEqual(report["symbols_excluded"], 0)
-            self.assertEqual(report["signals"], [])
+            self.assertEqual([item["symbol"] for item in report["signals"]], ["AMDUSDT"])
             self.assertEqual(scanner.scan_exit_code(report), 0)
             self.assertTrue(os.path.exists(state_path))
             saved = state.load_signal_state(state_path)
