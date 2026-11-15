@@ -174,6 +174,11 @@ def retry_pending():
             remaining.append(pending)
             _save_pending_queue(remaining+future)
             continue
+        # Mark the attempt as in-flight before network I/O. If the runner is
+        # interrupted after Bark accepts it, the next run must not resend blindly.
+        pending=dict(pending)
+        pending.update({"status":"sending","updated_at":datetime.now(TIMEZONE).isoformat()})
+        _save_pending_queue(remaining+[pending]+future)
         try:
             _send(str(pending.get("body","")),os.environ.get("V12_BARK_KEY","").strip())
         except DeliveryError as exc:
