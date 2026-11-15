@@ -34,7 +34,7 @@ class PublicFeedTests(unittest.TestCase):
         self.assertEqual(payload["scan_status"], "complete")
         self.assertEqual((payload["symbols_ok"], payload["symbols_total"]), (24, 24))
         self.assertEqual(len(payload["symbols"]), 24)
-        self.assertEqual(len(set(payload["symbols"])), 27)
+        self.assertEqual(len(set(payload["symbols"])), 24)
         self.assertIn("SKHY", payload["symbols"])
         self.assertEqual([x["symbol"] for x in payload["signals"]], ["AMZNUSDT"])
         self.assertFalse({"META","QCOM","CBRS"} & set(payload["symbols"]))
