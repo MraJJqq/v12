@@ -73,11 +73,35 @@ def _load(path):
 def _save_ok(fingerprint,day):
     atomic_write_json(BARK_STATE_PATH,{"version":2,"fingerprint":fingerprint,"date":day,"accepted_at":datetime.now(TIMEZONE).isoformat()})
 
-def _pending(fingerprint,day,body,symbols,status="sending",error=None):
-    atomic_write_json(BARK_PENDING_PATH,{"version":2,"fingerprint":fingerprint,"date":day,"body":body,"symbols":symbols,"status":status,"error":error,"updated_at":datetime.now(TIMEZONE).isoformat()})
+def _pending_queue():
+    state=_load(BARK_PENDING_PATH)
+    queued=state.get("pending")
+    if isinstance(queued,list):
+        return [item for item in queued if isinstance(item,dict)]
+    # Read the previous single-record format without dropping an outstanding notice.
+    if state.get("fingerprint"):
+        return [state]
+    return []
 
-def _clear():
-    atomic_write_json(BARK_PENDING_PATH,{"version":2,"pending":None})
+def _save_pending_queue(queue):
+    atomic_write_json(BARK_PENDING_PATH,{"version":3,"pending":queue})
+
+def _pending(fingerprint,day,body,symbols,status="sending",error=None):
+    queue=_pending_queue()
+    record={"version":3,"fingerprint":fingerprint,"date":day,"body":body,"symbols":symbols,"status":status,"error":error,"updated_at":datetime.now(TIMEZONE).isoformat()}
+    for index,item in enumerate(queue):
+        if item.get("fingerprint")==fingerprint:
+            queue[index]=record
+            break
+    else:
+        queue.append(record)
+    _save_pending_queue(queue)
+
+def _clear(fingerprint=None):
+    if fingerprint is None:
+        _save_pending_queue([])
+        return
+    _save_pending_queue([item for item in _pending_queue() if item.get("fingerprint")!=fingerprint])
 
 def _post(payload):
     request=urllib.request.Request(BARK_ENDPOINT,data=json.dumps(payload,ensure_ascii=False).encode(),
@@ -125,30 +149,45 @@ def _retry_delay(value):
         except (TypeError,ValueError,OverflowError):return 60
 
 def retry_pending():
-    pending=_load(BARK_PENDING_PATH); fingerprint=pending.get("fingerprint")
-    if not fingerprint:
+    queue=_pending_queue()
+    if not queue:
         print("No pending V12 Bark notification."); return 0
-    day=str(pending.get("date",""))
-    if day!=datetime.now(TIMEZONE).date().isoformat():
-        _clear(); print("Discarded stale V12 Bark retry."); return 0
-    if _accepted(fingerprint,day):
-        _clear(); print("Already accepted; duplicate retry suppressed."); return 0
-    status=pending.get("status","sending")
-    if status in ("sending","uncertain"):
-        print("Bark outcome is ambiguous; automatic resend suppressed to prevent duplicate notifications."); return 0
-    if status!="retryable":
-        print("Pending Bark notification is not safe for automatic retry."); return 0
-    try:
-        _send(str(pending.get("body","")),os.environ.get("V12_BARK_KEY","").strip())
-        _save_ok(fingerprint,day); _clear(); return 0
-    except DeliveryError as exc:
-        next_status="uncertain" if exc.uncertain else ("retryable" if exc.retryable else "rejected")
-        _pending(fingerprint,day,str(pending.get("body","")),list(pending.get("symbols",[])),next_status,str(exc))
-        if exc.retryable: time.sleep(_retry_delay(exc.retry_after))
-        print(f"ERROR: V12 Bark retry failed: {exc}",file=sys.stderr); return 1
-    except Exception as exc:
-        _pending(fingerprint,day,str(pending.get("body","")),list(pending.get("symbols",[])),"rejected",str(exc))
-        print(f"ERROR: V12 Bark retry failed: {exc}",file=sys.stderr); return 1
+    today=datetime.now(TIMEZONE).date().isoformat()
+    remaining=[]; failed=False
+    for pending in queue:
+        fingerprint=pending.get("fingerprint")
+        if not fingerprint:
+            continue
+        day=str(pending.get("date",""))
+        if day!=today:
+            print("Discarded stale V12 Bark retry.")
+            continue
+        if _accepted(fingerprint,day):
+            print("Already accepted; duplicate retry suppressed.")
+            continue
+        status=pending.get("status","sending")
+        if status!="retryable":
+            remaining.append(pending)
+            continue
+        try:
+            _send(str(pending.get("body","")),os.environ.get("V12_BARK_KEY","").strip())
+        except DeliveryError as exc:
+            pending=dict(pending)
+            pending.update({"status":"uncertain" if exc.uncertain else ("retryable" if exc.retryable else "rejected"),"error":str(exc),"updated_at":datetime.now(TIMEZONE).isoformat()})
+            remaining.append(pending)
+            failed=True
+            print(f"ERROR: V12 Bark retry failed: {exc}",file=sys.stderr)
+        except Exception as exc:
+            pending=dict(pending)
+            pending.update({"status":"rejected","error":str(exc),"updated_at":datetime.now(TIMEZONE).isoformat()})
+            remaining.append(pending)
+            failed=True
+            print(f"ERROR: V12 Bark retry failed: {exc}",file=sys.stderr)
+        else:
+            _save_ok(fingerprint,day)
+            print("V12 Bark retry accepted.")
+    _save_pending_queue(remaining)
+    return 1 if failed else 0
 
 def send_report(path):
     try:
@@ -160,8 +199,8 @@ def send_report(path):
         fingerprint=hashlib.sha256(f"{day}\n{scan_id}\n{body}".encode()).hexdigest()
         if _accepted(fingerprint,day):
             print("V12 Bark content unchanged; duplicate notification suppressed."); return 0
-        previous=_load(BARK_PENDING_PATH)
-        if previous.get("fingerprint")==fingerprint and previous.get("status") in ("sending","uncertain"):
+        previous=next((item for item in _pending_queue() if item.get("fingerprint")==fingerprint),None)
+        if previous and previous.get("status") in ("sending","uncertain"):
             print("Matching Bark delivery is unresolved; duplicate send suppressed."); return 1
         _pending(fingerprint,day,body,symbols,"sending")
         try:_send(body,os.environ.get("V12_BARK_KEY","").strip())
@@ -170,7 +209,7 @@ def send_report(path):
             _pending(fingerprint,day,body,symbols,status,str(exc)); raise
         except Exception as exc:
             _pending(fingerprint,day,body,symbols,"rejected",str(exc)); raise
-        _save_ok(fingerprint,day); _clear()
+        _save_ok(fingerprint,day); _clear(fingerprint)
         print("V12 Bark accepted; "+(", ".join(symbols) if symbols else "No change")); return 0
     except Exception as exc:
         print(f"ERROR: V12 Bark notification failed: {exc}",file=sys.stderr); return 1
