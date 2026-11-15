@@ -162,6 +162,76 @@ class BarkTests(unittest.TestCase):
             with open(state_path,encoding="utf-8") as stream: accepted=json.load(stream)
             self.assertEqual(accepted["fingerprint"],"legacy")
 
+    def test_retry_after_seconds_and_http_date(self):
+        from datetime import datetime,timezone,timedelta
+        from email.utils import format_datetime
+        from v12.bark import _retry_delay
+        now=datetime(2026,11,15,12,0,tzinfo=timezone.utc)
+        self.assertEqual(_retry_delay("125",now=now),125)
+        header=format_datetime(now+timedelta(seconds=240),usegmt=True)
+        self.assertEqual(_retry_delay(header,now=now),240)
+        self.assertEqual(_retry_delay(None,attempt=3,now=now),240)
+
+    def test_retry_pending_respects_next_retry_at(self):
+        from datetime import datetime,timedelta
+        from v12 import bark
+        from v12.config import TIMEZONE
+        with tempfile.TemporaryDirectory() as folder:
+            pending_path=os.path.join(folder,"pending.json")
+            state_path=os.path.join(folder,"accepted.json")
+            due=(datetime.now(TIMEZONE)+timedelta(hours=1)).isoformat()
+            item={"fingerprint":"later","date":datetime.now(TIMEZONE).date().isoformat(),
+                "body":"later","symbols":[],"status":"retryable","next_retry_at":due}
+            with open(pending_path,"w",encoding="utf-8") as stream:
+                json.dump({"version":3,"pending":[item]},stream)
+            with patch.object(bark,"BARK_PENDING_PATH",pending_path),patch.object(bark,"BARK_STATE_PATH",state_path),patch.object(bark,"_send") as send:
+                self.assertEqual(bark.retry_pending(),0)
+                send.assert_not_called()
+
+    def test_initial_429_persists_retry_after_and_due_time(self):
+        from v12 import bark
+        with tempfile.TemporaryDirectory() as folder:
+            report_path=os.path.join(folder,"report.json")
+            pending_path=os.path.join(folder,"pending.json")
+            state_path=os.path.join(folder,"state.json")
+            with open(report_path,"w",encoding="utf-8") as stream:
+                json.dump({"signal_day":"2026-11-15","started_at":"2026-11-15T20:00:00+08:00","signals":[]},stream)
+            error=DeliveryError("rate limited",retryable=True,retry_after="300")
+            with patch.object(bark,"BARK_PENDING_PATH",pending_path),patch.object(bark,"BARK_STATE_PATH",state_path),patch.object(bark,"_send",side_effect=error),patch.dict(os.environ,{"V12_BARK_KEY":"test"}):
+                self.assertEqual(send_report(report_path),1)
+            with open(pending_path,encoding="utf-8") as stream:
+                item=json.load(stream)["pending"][0]
+            self.assertEqual(item["status"],"retryable")
+            self.assertEqual(item["retry_after"],"300")
+            self.assertEqual(item["retry_attempts"],1)
+            self.assertTrue(item["next_retry_at"])
+
+    def test_watchdog_alert_uses_durable_queue_and_separate_accepted_state(self):
+        from datetime import datetime
+        from v12 import bark
+        from v12.config import TIMEZONE
+        with tempfile.TemporaryDirectory() as folder:
+            pending_path=os.path.join(folder,"pending.json")
+            scan_state=os.path.join(folder,"scan-state.json")
+            watchdog_state=os.path.join(folder,"watchdog-state.json")
+            error=DeliveryError("rate limited",retryable=True,retry_after="300")
+            with patch.object(bark,"BARK_PENDING_PATH",pending_path),patch.object(bark,"BARK_STATE_PATH",scan_state),patch.object(bark,"BARK_WATCHDOG_STATE_PATH",watchdog_state),patch.object(bark,"_send",side_effect=error):
+                with self.assertRaises(DeliveryError):
+                    bark.send_watchdog_alert("watchdog alert","test-key",42)
+            with open(pending_path,encoding="utf-8") as stream:
+                item=json.load(stream)["pending"][0]
+            self.assertEqual(item["kind"],"watchdog")
+            self.assertEqual(item["status"],"retryable")
+            item["next_retry_at"]=datetime.now(TIMEZONE).isoformat()
+            with open(pending_path,"w",encoding="utf-8") as stream:
+                json.dump({"version":3,"pending":[item]},stream)
+            with patch.object(bark,"BARK_PENDING_PATH",pending_path),patch.object(bark,"BARK_STATE_PATH",scan_state),patch.object(bark,"BARK_WATCHDOG_STATE_PATH",watchdog_state),patch.object(bark,"_send"):
+                self.assertEqual(bark.retry_pending(),0)
+            with open(watchdog_state,encoding="utf-8") as stream:
+                self.assertEqual(json.load(stream)["fingerprint"],item["fingerprint"])
+            self.assertFalse(os.path.exists(scan_state))
+
+
 class StatusTests(unittest.TestCase):
     def test_complete(self):
         self.assertEqual(scan_exit_code({"scan_status":"complete","symbols_ok":24,"symbols_total":24}),0)

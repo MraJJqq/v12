@@ -126,7 +126,7 @@ def main(now=None):
         })
         print(created.get("html_url","V12 watchdog issue created"))
         key=os.environ.get("V12_BARK_KEY","").strip()
-        if key: send_watchdog_alert(detail, key)
+        if key: send_watchdog_alert(detail, key, created.get("number"))
     elif not problems and alert:
         _request(api+f"/issues/{alert['number']}","PATCH",{"state":"closed"})
     for message in pending: print(message)

@@ -1,12 +1,13 @@
 """V12 Bark transport, daily deduplication and conservative retry handling."""
 import hashlib,json,os,sys,time,urllib.error,urllib.request
-from datetime import datetime
+from datetime import datetime,timedelta
 from email.utils import parsedate_to_datetime
 from .config import (
     BARK_ENDPOINT,
     BARK_GROUP,
     BARK_PENDING_PATH,
     BARK_STATE_PATH,
+    BARK_WATCHDOG_STATE_PATH,
     BARK_TIMEOUT_SECONDS,
     CORE_SYMBOLS,
     REPORT_PATH,
@@ -70,8 +71,8 @@ def _load(path):
     value=load_json(path,{})
     return value if isinstance(value,dict) else {}
 
-def _save_ok(fingerprint,day):
-    atomic_write_json(BARK_STATE_PATH,{"version":2,"fingerprint":fingerprint,"date":day,"accepted_at":datetime.now(TIMEZONE).isoformat()})
+def _save_ok(fingerprint,day,path=None):
+    atomic_write_json(path or BARK_STATE_PATH,{"version":2,"fingerprint":fingerprint,"date":day,"accepted_at":datetime.now(TIMEZONE).isoformat()})
 
 def _pending_queue():
     state=_load(BARK_PENDING_PATH)
@@ -86,9 +87,14 @@ def _pending_queue():
 def _save_pending_queue(queue):
     atomic_write_json(BARK_PENDING_PATH,{"version":3,"pending":queue})
 
-def _pending(fingerprint,day,body,symbols,status="sending",error=None):
+def _pending(fingerprint,day,body,symbols,status="sending",error=None,*,kind="scan",retry_after=None,retry_attempts=None,next_retry_at=None):
     queue=_pending_queue()
-    record={"version":3,"fingerprint":fingerprint,"date":day,"body":body,"symbols":symbols,"status":status,"error":error,"updated_at":datetime.now(TIMEZONE).isoformat()}
+    previous=next((item for item in queue if item.get("fingerprint")==fingerprint),{})
+    attempts=previous.get("retry_attempts",0) if retry_attempts is None else retry_attempts
+    record={"version":3,"fingerprint":fingerprint,"date":day,"body":body,"symbols":symbols,
+        "kind":kind,"status":status,"error":error,"retry_attempts":attempts,
+        "retry_after":retry_after,"next_retry_at":next_retry_at,
+        "updated_at":datetime.now(TIMEZONE).isoformat()}
     for index,item in enumerate(queue):
         if item.get("fingerprint")==fingerprint:
             queue[index]=record
@@ -130,23 +136,88 @@ def _send(body,key):
     if not key: raise RuntimeError("Repository secret V12_BARK_KEY is missing.")
     _post({"device_key":key,"body":body,"group":BARK_GROUP,"level":"active"})
 
-def send_watchdog_alert(body: str, key: str) -> None:
-    """Send a watchdog alert through the same Bark transport as scan notices."""
-    _send(body, key)
+def send_watchdog_alert(body: str, key: str, alert_id=None) -> None:
+    """Queue watchdog alerts through the same durable Bark transport as scan notices."""
+    day=datetime.now(TIMEZONE).date().isoformat()
+    identity=str(alert_id or hashlib.sha256(body.encode()).hexdigest())
+    fingerprint=hashlib.sha256(f"watchdog\\n{day}\\n{identity}".encode()).hexdigest()
+    if _accepted(fingerprint,day,BARK_WATCHDOG_STATE_PATH):
+        print("Watchdog Bark alert already accepted; duplicate suppressed.")
+        return
+    previous=next((item for item in _pending_queue() if item.get("fingerprint")==fingerprint),None)
+    if previous:
+        print("Watchdog Bark alert already queued; duplicate suppressed.")
+        return
+    _pending(fingerprint,day,body,[],"sending",kind="watchdog")
+    try:
+        _send(body,key)
+    except DeliveryError as exc:
+        status="uncertain" if exc.uncertain else ("retryable" if exc.retryable else "rejected")
+        attempts=1 if exc.retryable else 0
+        due=_retry_at(exc.retry_after,attempts) if exc.retryable else None
+        _pending(fingerprint,day,body,[],status,str(exc),kind="watchdog",
+            retry_after=exc.retry_after,retry_attempts=attempts,next_retry_at=due)
+        raise
+    except Exception as exc:
+        _pending(fingerprint,day,body,[],"rejected",str(exc),kind="watchdog")
+        raise
+    _save_ok(fingerprint,day,BARK_WATCHDOG_STATE_PATH)
+    _clear(fingerprint)
+    print("V12 Bark watchdog alert accepted.")
 
 
-def _accepted(fingerprint,day):
-    state=_load(BARK_STATE_PATH)
+def send_test_notification():
+    key=os.environ.get("V12_BARK_KEY","").strip()
+    if not key:
+        raise RuntimeError("Repository secret V12_BARK_KEY is missing.")
+    _send("VEGAS V12 Bark 测试通知\\n单次连通性测试，不代表正式信号。",key)
+    print("Bark test notification accepted.")
+
+
+def _state_path(kind="scan"):
+    return BARK_WATCHDOG_STATE_PATH if kind == "watchdog" else BARK_STATE_PATH
+
+
+def _accepted(fingerprint,day,path=None):
+    state=_load(path or BARK_STATE_PATH)
     return state.get("date")==day and state.get("fingerprint")==fingerprint
 
-def _retry_delay(value):
-    if not value:return 60
-    try:return min(300,max(1,int(float(value))))
-    except (TypeError,ValueError):
+
+def _retry_delay(value=None,attempt=1,now=None):
+    """Honor Retry-After; otherwise use bounded exponential backoff."""
+    if value is not None:
         try:
-            when=parsedate_to_datetime(value)
-            return min(300,max(1,int((when-datetime.now(when.tzinfo)).total_seconds())))
-        except (TypeError,ValueError,OverflowError):return 60
+            return max(1,int(float(str(value).strip())))
+        except (TypeError,ValueError,OverflowError):
+            try:
+                when=parsedate_to_datetime(str(value))
+                if when.tzinfo is None:
+                    from datetime import timezone
+                    when=when.replace(tzinfo=timezone.utc)
+                current=now or datetime.now(when.tzinfo)
+                return max(1,int((when-current.astimezone(when.tzinfo)).total_seconds()))
+            except (TypeError,ValueError,OverflowError):
+                pass
+    return min(3600,60*(2**max(0,int(attempt)-1)))
+
+
+def _retry_at(retry_after=None,attempt=1):
+    return (datetime.now(TIMEZONE)+timedelta(seconds=_retry_delay(retry_after,attempt))).isoformat()
+
+
+def _retry_due(pending,now=None):
+    value=pending.get("next_retry_at")
+    if not value:
+        return True
+    try:
+        due=datetime.fromisoformat(str(value).replace("Z","+00:00"))
+        if due.tzinfo is None:
+            due=due.replace(tzinfo=TIMEZONE)
+        current=now or datetime.now(TIMEZONE)
+        return current>=due.astimezone(TIMEZONE)
+    except (TypeError,ValueError,OverflowError):
+        return True
+
 
 def retry_pending():
     queue=_pending_queue()
@@ -165,17 +236,15 @@ def retry_pending():
             print("Discarded stale V12 Bark retry.")
             _save_pending_queue(remaining+future)
             continue
-        if _accepted(fingerprint,day):
+        state_path=_state_path(pending.get("kind","scan"))
+        if _accepted(fingerprint,day,state_path):
             print("Already accepted; duplicate retry suppressed.")
             _save_pending_queue(remaining+future)
             continue
-        status=pending.get("status","sending")
-        if status!="retryable":
+        if pending.get("status","sending")!="retryable" or not _retry_due(pending):
             remaining.append(pending)
             _save_pending_queue(remaining+future)
             continue
-        # Mark the attempt as in-flight before network I/O. If the runner is
-        # interrupted after Bark accepts it, the next run must not resend blindly.
         pending=dict(pending)
         pending.update({"status":"sending","updated_at":datetime.now(TIMEZONE).isoformat()})
         _save_pending_queue(remaining+[pending]+future)
@@ -183,7 +252,13 @@ def retry_pending():
             _send(str(pending.get("body","")),os.environ.get("V12_BARK_KEY","").strip())
         except DeliveryError as exc:
             pending=dict(pending)
-            pending.update({"status":"uncertain" if exc.uncertain else ("retryable" if exc.retryable else "rejected"),"error":str(exc),"updated_at":datetime.now(TIMEZONE).isoformat()})
+            if exc.retryable:
+                attempts=int(pending.get("retry_attempts",0))+1
+                pending.update({"status":"retryable","retry_attempts":attempts,
+                    "retry_after":exc.retry_after,"next_retry_at":_retry_at(exc.retry_after,attempts)})
+            else:
+                pending.update({"status":"uncertain" if exc.uncertain else "rejected"})
+            pending.update({"error":str(exc),"updated_at":datetime.now(TIMEZONE).isoformat()})
             remaining.append(pending)
             failed=True
             print(f"ERROR: V12 Bark retry failed: {exc}",file=sys.stderr)
@@ -194,10 +269,8 @@ def retry_pending():
             failed=True
             print(f"ERROR: V12 Bark retry failed: {exc}",file=sys.stderr)
         else:
-            _save_ok(fingerprint,day)
+            _save_ok(fingerprint,day,state_path)
             print("V12 Bark retry accepted.")
-        # Persist each result immediately so an interrupted batch cannot resend
-        # a notification that Bark already accepted.
         _save_pending_queue(remaining+future)
     return 1 if failed else 0
 
@@ -219,13 +292,25 @@ def send_report(path):
         try:_send(body,os.environ.get("V12_BARK_KEY","").strip())
         except DeliveryError as exc:
             status="uncertain" if exc.uncertain else ("retryable" if exc.retryable else "rejected")
-            _pending(fingerprint,day,body,symbols,status,str(exc)); raise
+            attempts=1 if exc.retryable else 0
+            due=_retry_at(exc.retry_after,attempts) if exc.retryable else None
+            _pending(fingerprint,day,body,symbols,status,str(exc),kind="scan",
+                retry_after=exc.retry_after,retry_attempts=attempts,next_retry_at=due); raise
         except Exception as exc:
-            _pending(fingerprint,day,body,symbols,"rejected",str(exc)); raise
+            _pending(fingerprint,day,body,symbols,"rejected",str(exc),kind="scan"); raise
         _save_ok(fingerprint,day); _clear(fingerprint)
         print("V12 Bark accepted; "+(", ".join(symbols) if symbols else "No change")); return 0
     except Exception as exc:
         print(f"ERROR: V12 Bark notification failed: {exc}",file=sys.stderr); return 1
 
 if __name__=="__main__":
-    sys.exit(retry_pending() if len(sys.argv)>1 and sys.argv[1]=="--retry-pending" else send_report(sys.argv[1] if len(sys.argv)>1 else REPORT_PATH))
+    if len(sys.argv)>1 and sys.argv[1]=="--retry-pending":
+        sys.exit(retry_pending())
+    if len(sys.argv)>1 and sys.argv[1]=="--test":
+        try:
+            send_test_notification()
+            sys.exit(0)
+        except Exception as exc:
+            print(f"ERROR: Bark test failed: {exc}",file=sys.stderr)
+            sys.exit(1)
+    sys.exit(send_report(sys.argv[1] if len(sys.argv)>1 else REPORT_PATH))
