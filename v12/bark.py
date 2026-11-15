@@ -329,7 +329,7 @@ def process_watchdog_issues():
         if not number:
             continue
         day=datetime.now(TIMEZONE).date().isoformat()
-        fingerprint=hashlib.sha256(f"watchdog\\n{day}\\n{number}".encode()).hexdigest()
+        fingerprint=hashlib.sha256(f"watchdog\n{day}\n{number}".encode()).hexdigest()
         if _accepted(fingerprint,day,BARK_WATCHDOG_STATE_PATH):
             _github_request(f"/issues/{number}","PATCH",{"state":"closed"})
             print(f"Watchdog alert issue #{number} closed after Bark acceptance.")
