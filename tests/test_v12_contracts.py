@@ -83,7 +83,8 @@ class BarkTests(unittest.TestCase):
             with patch.object(bark,"BARK_PENDING_PATH",pending_path),patch.object(bark,"BARK_STATE_PATH",state_path),patch.object(bark,"_send",side_effect=RuntimeError("missing key")):
                 self.assertEqual(send_report(report_path),1)
             with open(pending_path,encoding="utf-8") as stream:
-                self.assertEqual(json.load(stream)["status"],"rejected")
+                pending=json.load(stream)["pending"]
+                self.assertEqual(pending[0]["status"],"rejected")
 
     def test_each_scheduled_no_change_scan_still_pushes(self):
         from v12 import bark
