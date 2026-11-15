@@ -6,6 +6,7 @@ on:
 permissions:
   actions: read
   contents: write
+  issues: write
 concurrency:
   group: v12-bitget-scan
   cancel-in-progress: false
@@ -45,6 +46,9 @@ jobs:
         env:
           V12_BARK_KEY: ${{ secrets.V12_BARK_KEY }}
         run: python -m v12.bark --retry-pending
+      - name: Process queued Watchdog Bark alerts
+        if: always() && steps.retry.outcome != 'skipped'
+        run: python -m v12.bark --process-watchdog-issues
       - name: Persist retry state
         if: always() && steps.retry.outcome != 'skipped'
         run: |
