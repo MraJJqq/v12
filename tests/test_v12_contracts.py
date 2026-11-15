@@ -115,6 +115,34 @@ class BarkTests(unittest.TestCase):
         self.assertTrue(caught.exception.retryable)
         self.assertFalse(caught.exception.uncertain)
 
+    def test_pending_queue_preserves_distinct_notifications(self):
+        from v12 import bark
+        with tempfile.TemporaryDirectory() as folder:
+            path=os.path.join(folder,"pending.json")
+            with patch.object(bark,"BARK_PENDING_PATH",path):
+                bark._pending("first","2026-11-15","first body",["BTC"],"retryable")
+                bark._pending("second","2026-11-15","second body",["AMD"],"retryable")
+                with open(path,encoding="utf-8") as stream: state=json.load(stream)
+        self.assertEqual([item["fingerprint"] for item in state["pending"]],["first","second"])
+
+    def test_retry_pending_migrates_legacy_single_record(self):
+        from v12 import bark
+        from datetime import datetime
+        from v12.config import TIMEZONE
+        with tempfile.TemporaryDirectory() as folder:
+            pending_path=os.path.join(folder,"pending.json")
+            state_path=os.path.join(folder,"accepted.json")
+            today=datetime.now(TIMEZONE).date().isoformat()
+            with open(pending_path,"w",encoding="utf-8") as stream:
+                json.dump({"version":2,"fingerprint":"legacy","date":today,"body":"legacy body","symbols":["BTC"],"status":"retryable"},stream)
+            with patch.object(bark,"BARK_PENDING_PATH",pending_path),patch.object(bark,"BARK_STATE_PATH",state_path),patch.object(bark,"_send") as send:
+                self.assertEqual(bark.retry_pending(),0)
+                send.assert_called_once_with("legacy body",os.environ.get("V12_BARK_KEY","").strip())
+            with open(pending_path,encoding="utf-8") as stream: state=json.load(stream)
+            self.assertEqual(state,{"version":3,"pending":[]})
+            with open(state_path,encoding="utf-8") as stream: accepted=json.load(stream)
+            self.assertEqual(accepted["fingerprint"],"legacy")
+
 class StatusTests(unittest.TestCase):
     def test_complete(self):
         self.assertEqual(scan_exit_code({"scan_status":"complete","symbols_ok":24,"symbols_total":24}),0)
