@@ -124,8 +124,6 @@ def main(now=None):
             "body":"V12 scheduled scan health issue.\n\n"+detail
         })
         print(created.get("html_url","V12 watchdog issue created"))
-    elif not problems and alert:
-        _request(api+f"/issues/{alert['number']}","PATCH",{"state":"closed"})
     for message in pending: print(message)
     if not problems: print("No failed due V12 scans detected.")
     return 0
