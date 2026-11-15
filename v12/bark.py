@@ -140,7 +140,7 @@ def send_watchdog_alert(body: str, key: str, alert_id=None) -> None:
     """Queue watchdog alerts through the same durable Bark transport as scan notices."""
     day=datetime.now(TIMEZONE).date().isoformat()
     identity=str(alert_id or hashlib.sha256(body.encode()).hexdigest())
-    fingerprint=hashlib.sha256(f"watchdog\\n{day}\\n{identity}".encode()).hexdigest()
+    fingerprint=hashlib.sha256(f"watchdog\n{day}\n{identity}".encode()).hexdigest()
     if _accepted(fingerprint,day,BARK_WATCHDOG_STATE_PATH):
         print("Watchdog Bark alert already accepted; duplicate suppressed.")
         return
@@ -170,7 +170,7 @@ def send_test_notification():
     key=os.environ.get("V12_BARK_KEY","").strip()
     if not key:
         raise RuntimeError("Repository secret V12_BARK_KEY is missing.")
-    _send("VEGAS V12 Bark 测试通知\\n单次连通性测试，不代表正式信号。",key)
+    _send("VEGAS V12 Bark 测试通知\n单次连通性测试，不代表正式信号。",key)
     print("Bark test notification accepted.")
 
 
@@ -286,7 +286,7 @@ def send_report(path):
             _clear(fingerprint)
             print("V12 Bark content unchanged; duplicate notification suppressed."); return 0
         previous=next((item for item in _pending_queue() if item.get("fingerprint")==fingerprint),None)
-        if previous and previous.get("status") in ("sending","uncertain"):
+        if previous and previous.get("status") in ("sending","uncertain","retryable"):
             print("Matching Bark delivery is unresolved; duplicate send suppressed."); return 1
         _pending(fingerprint,day,body,symbols,"sending")
         try:_send(body,os.environ.get("V12_BARK_KEY","").strip())

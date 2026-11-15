@@ -110,11 +110,12 @@ class BarkTests(unittest.TestCase):
         self.assertTrue(caught.exception.uncertain)
     def test_429_is_retryable(self):
         import urllib.error
-        error=urllib.error.HTTPError("https://api.day.app/push",429,"rate limited",{},None)
+        error=urllib.error.HTTPError("https://api.day.app/push",429,"rate limited",{"Retry-After":"45"},None)
         with patch("urllib.request.urlopen",side_effect=error):
             with self.assertRaises(DeliveryError) as caught:_post({"body":"test"})
         self.assertTrue(caught.exception.retryable)
         self.assertFalse(caught.exception.uncertain)
+        self.assertEqual(caught.exception.retry_after,"45")
 
     def test_pending_queue_preserves_distinct_notifications(self):
         from v12 import bark
