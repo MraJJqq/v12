@@ -154,20 +154,25 @@ def retry_pending():
         print("No pending V12 Bark notification."); return 0
     today=datetime.now(TIMEZONE).date().isoformat()
     remaining=[]; failed=False
-    for pending in queue:
+    for index,pending in enumerate(queue):
+        future=queue[index+1:]
         fingerprint=pending.get("fingerprint")
         if not fingerprint:
+            _save_pending_queue(remaining+future)
             continue
         day=str(pending.get("date",""))
         if day!=today:
             print("Discarded stale V12 Bark retry.")
+            _save_pending_queue(remaining+future)
             continue
         if _accepted(fingerprint,day):
             print("Already accepted; duplicate retry suppressed.")
+            _save_pending_queue(remaining+future)
             continue
         status=pending.get("status","sending")
         if status!="retryable":
             remaining.append(pending)
+            _save_pending_queue(remaining+future)
             continue
         try:
             _send(str(pending.get("body","")),os.environ.get("V12_BARK_KEY","").strip())
@@ -186,7 +191,9 @@ def retry_pending():
         else:
             _save_ok(fingerprint,day)
             print("V12 Bark retry accepted.")
-    _save_pending_queue(remaining)
+        # Persist each result immediately so an interrupted batch cannot resend
+        # a notification that Bark already accepted.
+        _save_pending_queue(remaining+future)
     return 1 if failed else 0
 
 def send_report(path):
@@ -198,6 +205,7 @@ def send_report(path):
         scan_id=str(report.get("started_at") or datetime.now(TIMEZONE).isoformat())
         fingerprint=hashlib.sha256(f"{day}\n{scan_id}\n{body}".encode()).hexdigest()
         if _accepted(fingerprint,day):
+            _clear(fingerprint)
             print("V12 Bark content unchanged; duplicate notification suppressed."); return 0
         previous=next((item for item in _pending_queue() if item.get("fingerprint")==fingerprint),None)
         if previous and previous.get("status") in ("sending","uncertain"):
