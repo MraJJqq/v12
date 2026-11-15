@@ -1,5 +1,7 @@
 name: V12 Bark Pending Retry
 on:
+  schedule:
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 permissions:
   actions: read
