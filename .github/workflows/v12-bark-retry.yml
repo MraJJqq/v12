@@ -21,6 +21,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Validate Bark secret
+        env:
+          V12_BARK_KEY: ${{ secrets.V12_BARK_KEY }}
+        run: test -n "$V12_BARK_KEY" || { echo "::error::V12_BARK_KEY is missing"; exit 1; }
       - name: Guard against active scan
         id: guard
         env:
