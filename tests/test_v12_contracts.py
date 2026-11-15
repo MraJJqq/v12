@@ -136,7 +136,7 @@ class BarkTests(unittest.TestCase):
             state_path=os.path.join(folder,"accepted.json")
             today=datetime.now(TIMEZONE).date().isoformat()
             with open(pending_path,"w",encoding="utf-8") as stream:
-                json.dump({"version":3,"pending":[{"fingerprint":"interrupted","date":today,"body":"notice","symbols":["BTC"],"status":"retryable"}]},stream)
+                json.dump({"pending":[{"fingerprint":"interrupted","date":today,"body":"notice","symbols":["BTC"],"status":"retryable"}]},stream)
             with patch.object(bark,"BARK_PENDING_PATH",pending_path),patch.object(bark,"BARK_STATE_PATH",state_path),patch.object(bark,"_send",side_effect=KeyboardInterrupt):
                 with self.assertRaises(KeyboardInterrupt): bark.retry_pending()
             with open(pending_path,encoding="utf-8") as stream:
@@ -145,23 +145,14 @@ class BarkTests(unittest.TestCase):
                 self.assertEqual(bark.retry_pending(),0)
                 send.assert_not_called()
 
-    def test_retry_pending_migrates_legacy_single_record(self):
+    def test_pending_queue_does_not_read_legacy_single_record(self):
         from v12 import bark
-        from datetime import datetime
-        from v12.config import TIMEZONE
         with tempfile.TemporaryDirectory() as folder:
             pending_path=os.path.join(folder,"pending.json")
-            state_path=os.path.join(folder,"accepted.json")
-            today=datetime.now(TIMEZONE).date().isoformat()
             with open(pending_path,"w",encoding="utf-8") as stream:
-                json.dump({"version":2,"fingerprint":"legacy","date":today,"body":"legacy body","symbols":["BTC"],"status":"retryable"},stream)
-            with patch.object(bark,"BARK_PENDING_PATH",pending_path),patch.object(bark,"BARK_STATE_PATH",state_path),patch.object(bark,"_send") as send:
-                self.assertEqual(bark.retry_pending(),0)
-                send.assert_called_once_with("legacy body",os.environ.get("V12_BARK_KEY","").strip())
-            with open(pending_path,encoding="utf-8") as stream: state=json.load(stream)
-            self.assertEqual(state,{"version":3,"pending":[]})
-            with open(state_path,encoding="utf-8") as stream: accepted=json.load(stream)
-            self.assertEqual(accepted["fingerprint"],"legacy")
+                json.dump({"fingerprint":"old","date":"2026-11-15","body":"old body","status":"retryable"},stream)
+            with patch.object(bark,"BARK_PENDING_PATH",pending_path):
+                self.assertEqual(bark._pending_queue(),[])
 
     def test_retry_after_seconds_and_http_date(self):
         from datetime import datetime,timezone,timedelta
@@ -184,7 +175,7 @@ class BarkTests(unittest.TestCase):
             item={"fingerprint":"later","date":datetime.now(TIMEZONE).date().isoformat(),
                 "body":"later","symbols":[],"status":"retryable","next_retry_at":due}
             with open(pending_path,"w",encoding="utf-8") as stream:
-                json.dump({"version":3,"pending":[item]},stream)
+                json.dump({"pending":[item]},stream)
             with patch.object(bark,"BARK_PENDING_PATH",pending_path),patch.object(bark,"BARK_STATE_PATH",state_path),patch.object(bark,"_send") as send:
                 self.assertEqual(bark.retry_pending(),0)
                 send.assert_not_called()
@@ -225,7 +216,7 @@ class BarkTests(unittest.TestCase):
             self.assertEqual(item["status"],"retryable")
             item["next_retry_at"]=datetime.now(TIMEZONE).isoformat()
             with open(pending_path,"w",encoding="utf-8") as stream:
-                json.dump({"version":3,"pending":[item]},stream)
+                json.dump({"pending":[item]},stream)
             with patch.object(bark,"BARK_PENDING_PATH",pending_path),patch.object(bark,"BARK_STATE_PATH",scan_state),patch.object(bark,"BARK_WATCHDOG_STATE_PATH",watchdog_state),patch.object(bark,"_send"):
                 self.assertEqual(bark.retry_pending(),0)
             with open(watchdog_state,encoding="utf-8") as stream:

@@ -72,26 +72,23 @@ def _load(path):
     return value if isinstance(value,dict) else {}
 
 def _save_ok(fingerprint,day,path=None):
-    atomic_write_json(path or BARK_STATE_PATH,{"version":2,"fingerprint":fingerprint,"date":day,"accepted_at":datetime.now(TIMEZONE).isoformat()})
+    atomic_write_json(path or BARK_STATE_PATH,{"fingerprint":fingerprint,"date":day,"accepted_at":datetime.now(TIMEZONE).isoformat()})
 
 def _pending_queue():
     state=_load(BARK_PENDING_PATH)
     queued=state.get("pending")
     if isinstance(queued,list):
         return [item for item in queued if isinstance(item,dict)]
-    # Read the previous single-record format without dropping an outstanding notice.
-    if state.get("fingerprint"):
-        return [state]
     return []
 
 def _save_pending_queue(queue):
-    atomic_write_json(BARK_PENDING_PATH,{"version":3,"pending":queue})
+    atomic_write_json(BARK_PENDING_PATH,{"pending":queue})
 
 def _pending(fingerprint,day,body,symbols,status="sending",error=None,*,kind="scan",retry_after=None,retry_attempts=None,next_retry_at=None):
     queue=_pending_queue()
     previous=next((item for item in queue if item.get("fingerprint")==fingerprint),{})
     attempts=previous.get("retry_attempts",0) if retry_attempts is None else retry_attempts
-    record={"version":3,"fingerprint":fingerprint,"date":day,"body":body,"symbols":symbols,
+    record={"fingerprint":fingerprint,"date":day,"body":body,"symbols":symbols,
         "kind":kind,"status":status,"error":error,"retry_attempts":attempts,
         "retry_after":retry_after,"next_retry_at":next_retry_at,
         "updated_at":datetime.now(TIMEZONE).isoformat()}
