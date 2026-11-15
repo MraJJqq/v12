@@ -38,8 +38,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .cache/v12-candles
-          key: v12-candle-cache-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: v12-candle-cache-
+          key: v12-candle-cache-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: v12-candle-cache-v2-
       - name: Install runtime dependencies
         run: python -m pip install -r requirements.txt && python -m compileall -q v12 signal_rules.py
       - name: Scan Bitget history
@@ -52,7 +52,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .cache/v12-candles
-          key: v12-candle-cache-${{ github.run_id }}-${{ github.run_attempt }}
+          key: v12-candle-cache-v2-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Persist signal state
         if: always() && steps.scan.outcome == 'success'
         run: |

@@ -11,8 +11,7 @@ class PoolTests(unittest.TestCase):
         self.assertEqual((len(SYMBOLS),len(CORE_SYMBOLS),len(STOCK_SYMBOLS)),(24,4,20))
         self.assertIn("SKHYUSDT",SYMBOLS)
         self.assertNotIn("SKHYNIXUSDT",SYMBOLS)
-        for removed in ("METAUSDT","QCOMUSDT","CBRSUSDT"):
-            self.assertNotIn(removed,SYMBOLS)
+        self.assertEqual(len(set(SYMBOLS)),24)
 
 class CandleTests(unittest.TestCase):
     def test_valid_row(self):
@@ -61,8 +60,8 @@ class CandleTests(unittest.TestCase):
         self.assertTrue(cache["complete"])
 
 class BarkTests(unittest.TestCase):
-    def test_removed_symbols_are_not_notified(self):
-        _,symbols=build_body({"signals":[{"symbol":x+"USDT","formal_signal":True} for x in ("META","QCOM","CBRS")]})
+    def test_non_pool_symbols_are_not_notified(self):
+        _,symbols=build_body({"signals":[{"symbol":"XYZUSDT","formal_signal":True}]})
         self.assertEqual(symbols,[])
 
     def test_no_change_sections(self):

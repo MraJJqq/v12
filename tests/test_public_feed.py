@@ -16,11 +16,7 @@ def complete_report():
         "signals": [
             {"symbol": "AMZNUSDT", "formal_signal": True, "candle_timestamp_ms": 1,
              "filter_side": "多", "tunnels": ["中锋"]},
-            {"symbol": "QCOMUSDT", "formal_signal": True, "candle_timestamp_ms": 2,
-             "filter_side": "空", "tunnels": ["红峰"]},
-            {"symbol": "METAUSDT", "formal_signal": True, "candle_timestamp_ms": 3,
-             "filter_side": "多", "tunnels": ["中锋"]},
-            {"symbol": "CBRSUSDT", "formal_signal": True, "candle_timestamp_ms": 4,
+            {"symbol": "XYZUSDT", "formal_signal": True, "candle_timestamp_ms": 2,
              "filter_side": "空", "tunnels": ["红峰"]},
             {"symbol": "BTCUSDT", "formal_signal": False},
         ],
@@ -37,7 +33,6 @@ class PublicFeedTests(unittest.TestCase):
         self.assertEqual(len(set(payload["symbols"])), 24)
         self.assertIn("SKHY", payload["symbols"])
         self.assertEqual([x["symbol"] for x in payload["signals"]], ["AMZNUSDT"])
-        self.assertFalse({"META","QCOM","CBRS"} & set(payload["symbols"]))
 
     def test_incomplete_scan_is_never_published_or_allowed_to_overwrite(self):
         with tempfile.TemporaryDirectory() as folder:
