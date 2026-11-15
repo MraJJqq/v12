@@ -126,6 +126,24 @@ class BarkTests(unittest.TestCase):
                 with open(path,encoding="utf-8") as stream: state=json.load(stream)
         self.assertEqual([item["fingerprint"] for item in state["pending"]],["first","second"])
 
+    def test_interrupted_retry_is_not_blindly_resent(self):
+        from v12 import bark
+        from datetime import datetime
+        from v12.config import TIMEZONE
+        with tempfile.TemporaryDirectory() as folder:
+            pending_path=os.path.join(folder,"pending.json")
+            state_path=os.path.join(folder,"accepted.json")
+            today=datetime.now(TIMEZONE).date().isoformat()
+            with open(pending_path,"w",encoding="utf-8") as stream:
+                json.dump({"version":3,"pending":[{"fingerprint":"interrupted","date":today,"body":"notice","symbols":["BTC"],"status":"retryable"}]},stream)
+            with patch.object(bark,"BARK_PENDING_PATH",pending_path),patch.object(bark,"BARK_STATE_PATH",state_path),patch.object(bark,"_send",side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt): bark.retry_pending()
+            with open(pending_path,encoding="utf-8") as stream:
+                self.assertEqual(json.load(stream)["pending"][0]["status"],"sending")
+            with patch.object(bark,"BARK_PENDING_PATH",pending_path),patch.object(bark,"BARK_STATE_PATH",state_path),patch.object(bark,"_send") as send:
+                self.assertEqual(bark.retry_pending(),0)
+                send.assert_not_called()
+
     def test_retry_pending_migrates_legacy_single_record(self):
         from v12 import bark
         from datetime import datetime
