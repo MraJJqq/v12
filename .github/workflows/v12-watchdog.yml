@@ -4,6 +4,7 @@ on:
     - cron: "*/15 * * * *"
   workflow_dispatch:
 permissions:
+  contents: read
   actions: write
   issues: write
 concurrency:
