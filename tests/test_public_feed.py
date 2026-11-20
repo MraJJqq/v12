@@ -9,8 +9,8 @@ def complete_report():
     return {
         "signal_day": "2026-11-05",
         "scan_status": "complete",
-        "symbols_ok": 24,
-        "symbols_total": 24,
+        "symbols_ok": 22,
+        "symbols_total": 22,
         "started_at": "2026-11-05T16:00:00+08:00",
         "finished_at": "2026-11-05T16:04:00+08:00",
         "signals": [
@@ -28,10 +28,12 @@ class PublicFeedTests(unittest.TestCase):
         self.assertEqual(payload["source"], "VEGAS V12")
         self.assertEqual(payload["schema_version"], 1)
         self.assertEqual(payload["scan_status"], "complete")
-        self.assertEqual((payload["symbols_ok"], payload["symbols_total"]), (24, 24))
-        self.assertEqual(len(payload["symbols"]), 24)
-        self.assertEqual(len(set(payload["symbols"])), 24)
+        self.assertEqual((payload["symbols_ok"], payload["symbols_total"]), (22, 22))
+        self.assertEqual(len(payload["symbols"]), 22)
+        self.assertEqual(len(set(payload["symbols"])), 22)
         self.assertIn("SKHY", payload["symbols"])
+        self.assertIn("OPENAI", payload["symbols"])
+        self.assertNotIn("INTC", payload["symbols"])
         self.assertEqual([x["symbol"] for x in payload["signals"]], ["AMZNUSDT"])
 
     def test_incomplete_scan_is_never_published_or_allowed_to_overwrite(self):

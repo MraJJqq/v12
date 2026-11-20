@@ -7,11 +7,13 @@ from v12.scanner import _frame, scan_exit_code
 from v12.state import atomic_write_json, load_signal_state, merge_daily_signals
 
 class PoolTests(unittest.TestCase):
-    def test_24_contracts(self):
-        self.assertEqual((len(SYMBOLS),len(CORE_SYMBOLS),len(STOCK_SYMBOLS)),(24,4,20))
+    def test_22_contracts(self):
+        self.assertEqual((len(SYMBOLS),len(CORE_SYMBOLS),len(STOCK_SYMBOLS)),(22,4,18))
         self.assertIn("SKHYUSDT",SYMBOLS)
+        self.assertIn("OPENAIUSDT",SYMBOLS)
+        self.assertNotIn("INTCUSDT",SYMBOLS)
         self.assertNotIn("SKHYNIXUSDT",SYMBOLS)
-        self.assertEqual(len(set(SYMBOLS)),24)
+        self.assertEqual(len(set(SYMBOLS)),22)
 
 class CandleTests(unittest.TestCase):
     def test_valid_row(self):
