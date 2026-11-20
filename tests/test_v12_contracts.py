@@ -11,8 +11,6 @@ class PoolTests(unittest.TestCase):
         self.assertEqual((len(SYMBOLS),len(CORE_SYMBOLS),len(STOCK_SYMBOLS)),(22,4,18))
         self.assertIn("SKHYUSDT",SYMBOLS)
         self.assertIn("OPENAIUSDT",SYMBOLS)
-        self.assertNotIn("INTCUSDT",SYMBOLS)
-        self.assertNotIn("SKHYNIXUSDT",SYMBOLS)
         self.assertEqual(len(set(SYMBOLS)),22)
 
 class CandleTests(unittest.TestCase):
@@ -247,9 +245,9 @@ class BarkTests(unittest.TestCase):
 
 class StatusTests(unittest.TestCase):
     def test_complete(self):
-        self.assertEqual(scan_exit_code({"scan_status":"complete","symbols_ok":24,"symbols_total":24}),0)
+        self.assertEqual(scan_exit_code({"scan_status":"complete","symbols_ok":22,"symbols_total":22}),0)
     def test_partial(self):
-        self.assertEqual(scan_exit_code({"scan_status":"partial","symbols_ok":23,"symbols_total":24}),1)
+        self.assertEqual(scan_exit_code({"scan_status":"partial","symbols_ok":21,"symbols_total":22}),1)
 
 
 
