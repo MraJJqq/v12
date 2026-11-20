@@ -30,7 +30,7 @@ class RuntimeSimulationTests(unittest.TestCase):
                 json.dump({"__daily_formal_signals__": {
                     "date": datetime.now(scanner.TIMEZONE).date().isoformat(),
                     "signals": [
-                        {"symbol": "QCOMUSDT", "formal_signal": True, "candle_timestamp_ms": 1, "filter_side": "多"},
+                        {"symbol": "XYZUSDT", "formal_signal": True, "candle_timestamp_ms": 1, "filter_side": "多"},
                         {"symbol": "AMDUSDT", "formal_signal": True, "candle_timestamp_ms": 2, "filter_side": "多"},
                     ],
                 }}, stream)

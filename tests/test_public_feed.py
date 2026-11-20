@@ -33,7 +33,6 @@ class PublicFeedTests(unittest.TestCase):
         self.assertEqual(len(set(payload["symbols"])), 22)
         self.assertIn("SKHY", payload["symbols"])
         self.assertIn("OPENAI", payload["symbols"])
-        self.assertNotIn("INTC", payload["symbols"])
         self.assertEqual([x["symbol"] for x in payload["signals"]], ["AMZNUSDT"])
 
     def test_incomplete_scan_is_never_published_or_allowed_to_overwrite(self):
@@ -43,7 +42,7 @@ class PublicFeedTests(unittest.TestCase):
                 json.dump({"source": "previous"}, stream)
             report = complete_report()
             report["scan_status"] = "partial"
-            report["symbols_ok"] = 23
+            report["symbols_ok"] = 21
             self.assertFalse(publish_public_feed(report, path))
             with open(path, encoding="utf-8") as stream:
                 self.assertEqual(json.load(stream), {"source": "previous"})
