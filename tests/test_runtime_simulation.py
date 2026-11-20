@@ -42,9 +42,10 @@ class RuntimeSimulationTests(unittest.TestCase):
                 report = scanner.scan_market_data()
 
             self.assertEqual(report["scan_status"], "complete")
-            self.assertEqual(report["symbols_total"], 24)
-            self.assertEqual(report["symbols_ok"], 24)
+            self.assertEqual(report["symbols_total"], 22)
+            self.assertEqual(report["symbols_ok"], 22)
             self.assertEqual(report["symbols_excluded"], 0)
+            self.assertIn("OPENAIUSDT", [item["symbol"] for item in report["results"]])
             self.assertEqual([item["symbol"] for item in report["signals"]], ["AMDUSDT"])
             self.assertEqual(scanner.scan_exit_code(report), 0)
             self.assertTrue(os.path.exists(state_path))
