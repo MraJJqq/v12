@@ -59,7 +59,7 @@ class BarkSlotDeliveryTests(unittest.TestCase):
                 with open(pending_path,encoding="utf-8") as stream:
                     item=json.load(stream)["pending"][0]
                 body,_,day,slot,fingerprint=bark._report_delivery(report_path)
-                expected=hashlib.sha256(f"{day}\\n{slot}\\n{body}".encode()).hexdigest()
+                expected=hashlib.sha256(f"{day}\n{slot}\n{body}".encode()).hexdigest()
                 self.assertEqual(fingerprint,expected)
                 self.assertEqual(item["status"],"sending")
                 self.assertEqual(bark.deliver_prepared(report_path),0)
