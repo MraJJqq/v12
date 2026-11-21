@@ -1,4 +1,4 @@
-name: V12 Runtime Simulation (No Live Bark)
+name: V12 Runtime Simulation
 on:
   workflow_dispatch:
 permissions:

@@ -2,12 +2,11 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import datetime
 from unittest.mock import patch
 
 import pandas as pd
 
-from v12 import bark, scanner, state
+from v12 import scanner, state
 
 
 class RuntimeSimulationTests(unittest.TestCase):
@@ -73,58 +72,6 @@ class RuntimeSimulationTests(unittest.TestCase):
         )
         self.assertEqual(next_day, {"date": "2026-11-06", "signals": []})
 
-    def test_bark_simulation_sends_once_and_suppresses_duplicate(self):
-        with tempfile.TemporaryDirectory() as folder:
-            report_path = os.path.join(folder, "report.json")
-            state_path = os.path.join(folder, "bark-state.json")
-            pending_path = os.path.join(folder, "bark-pending.json")
-            report = {
-                "signal_day": datetime.now(bark.TIMEZONE).date().isoformat(),
-                "started_at": datetime.now(bark.TIMEZONE).date().isoformat() + "T08:00:00+08:00",
-                "signals": [],
-            }
-            with open(report_path, "w", encoding="utf-8") as stream:
-                json.dump(report, stream)
-
-            sent = []
-            with patch.object(bark, "BARK_STATE_PATH", state_path), \
-                 patch.object(bark, "BARK_PENDING_PATH", pending_path), \
-                 patch.object(bark, "_send", side_effect=lambda body, key: sent.append(body)), \
-                 patch.dict(os.environ, {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_RUN_ID": "unit-test-run", "V12_BARK_RECOVERY_SLOT": ""}):
-                self.assertEqual(bark.send_report(report_path), 0)
-                self.assertEqual(bark.send_report(report_path), 0)
-
-            self.assertEqual(len(sent), 1)
-            self.assertEqual(sent[0], "美股巨头\n▰ No change ▰\n\n核心能源\n▰ No change ▰")
-
-
-    def test_end_to_end_scan_report_to_bark_uses_mocked_transport(self):
-        with tempfile.TemporaryDirectory() as folder:
-            signal_state_path = os.path.join(folder, "signal-state.json")
-            report_path = os.path.join(folder, "scan-report.json")
-            bark_state_path = os.path.join(folder, "bark-state.json")
-            pending_path = os.path.join(folder, "bark-pending.json")
-            row = self.candle(1793836800000)
-
-            with patch.object(scanner, "STATE_PATH", signal_state_path), \
-                 patch.object(scanner, "fetch_candles", return_value=[row]), \
-                 patch.object(scanner, "detect_signals",
-                              return_value=pd.DataFrame(columns=["time", "direction", "tunnels"])):
-                report = scanner.scan_market_data()
-
-            with open(report_path, "w", encoding="utf-8") as stream:
-                json.dump(report, stream)
-
-            sent = []
-            with patch.object(bark, "BARK_STATE_PATH", bark_state_path), \
-                 patch.object(bark, "BARK_PENDING_PATH", pending_path), \
-                 patch.object(bark, "_send", side_effect=lambda body, key: sent.append(body)):
-                self.assertEqual(bark.send_report(report_path), 0)
-                self.assertEqual(bark.send_report(report_path), 0)
-
-            self.assertEqual(report["scan_status"], "complete")
-            self.assertEqual(len(sent), 1)
-            self.assertIn("▰ No change ▰", sent[0])
 
 
 if __name__ == "__main__":
