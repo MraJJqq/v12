@@ -68,6 +68,10 @@ jobs:
         if: always() && steps.scan.outcome == 'success'
         env:
           V12_BARK_KEY: ${{ secrets.V12_BARK_KEY }}
+          V12_BARK_RECOVERY_SLOT: ${{ inputs.recovery_slot || '' }}
+          V12_BARK_SCHEDULE_CRON: ${{ github.event.schedule || '' }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
         run: python -m v12.bark v12/scan-report.json
       - name: Persist Bark state
         if: always() && steps.bark.outcome != 'skipped' && steps.bark.outcome != ''
