@@ -28,6 +28,6 @@ jobs:
           cache-dependency-path: requirements.txt
       - name: Monitor scheduled scans and dispatch bounded recovery
         env:
-          GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: \${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: python -m v12.watchdog
