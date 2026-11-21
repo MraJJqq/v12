@@ -31,6 +31,33 @@ def _issue(items,title):
 def _created(item):
     return datetime.fromisoformat(item["created_at"].replace("Z","+00:00"))
 
+def _scan_delivery_state(api,run):
+    """Inspect step outcomes, not the overall workflow conclusion.
+
+    A scan can publish its Bark notice successfully and then fail while
+    persisting Git state. Such a run must never trigger another scan.
+    """
+    run_id=run.get("id")
+    if not run_id:
+        raise RuntimeError("Completed V12 scan run has no id")
+    payload=_request(api+f"/actions/runs/{run_id}/jobs?per_page=100") or {}
+    steps={}
+    for job in payload.get("jobs",[]):
+        for step in job.get("steps",[]) or []:
+            name=str(step.get("name","")).strip()
+            if name:
+                steps[name]=step.get("conclusion") or step.get("status")
+    scan=steps.get("Scan Bitget history")
+    bark=steps.get("Send Bark notification")
+    if scan=="success" and bark=="success":
+        return "delivered"
+    if scan=="success" and bark not in (None,"success"):
+        return "bark_failed"
+    if scan in ("failure","cancelled","timed_out","action_required"):
+        return "scan_failed"
+    return "unknown"
+
+
 def _later_success(runs,failed,slot_end,marker):
     """Only a later success for this same slot can supersede its failed scan."""
     start=_created(failed)
@@ -108,13 +135,20 @@ def main(now=None):
             pending.append(f"Beijing {hour:02d}:00 scan is running.")
             continue
         if lock: _close_lock(api,issues,lock)
-        if latest.get("conclusion")!="success" and not _later_success(
-            runs, latest, utc_end-timedelta(minutes=WATCHDOG_GRACE_MINUTES), marker
-        ):
+        delivery_state=_scan_delivery_state(api,latest)
+        if delivery_state=="delivered":
+            pending.append(f"Beijing {hour:02d}:00 scan and Bark delivery succeeded; recovery suppressed.")
+        elif delivery_state=="bark_failed":
+            # The scan itself completed. Bark retry owns notification recovery;
+            # launching another scan here could create a duplicate signal push.
+            pending.append(f"Beijing {hour:02d}:00 scan succeeded but Bark delivery failed; no rescan, defer to Bark retry.")
+        elif delivery_state=="scan_failed":
             if not is_recovery:
                 pending.append(_dispatch(api,issues,marker,slot))
             else:
                 problems.append(f"Beijing {hour:02d}:00 recovery scan failed: run #{latest.get('run_number')} / {latest.get('conclusion')}.")
+        else:
+            problems.append(f"Beijing {hour:02d}:00 completed run #{latest.get('run_number')} has no conclusive scan/Bark step status; automatic rescan suppressed to prevent duplicate delivery.")
 
     alert=_issue(issues,"[V12 Watchdog] Scan health alert")
     if problems and not alert:
