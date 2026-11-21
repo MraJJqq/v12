@@ -40,6 +40,47 @@ jobs:
         env:
           V12_REPORT_PATH: v12/scan-report.json
         run: python -m v12.scanner
+      - name: Attach delivery identity to complete scan snapshot
+        if: steps.scan.outcome == 'success'
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_EVENT_SCHEDULE: ${{ github.event.schedule || '' }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          path = "v12/public-signals.json"
+          with open(path, encoding="utf-8") as stream:
+              feed = json.load(stream)
+          day = str(feed["signal_day"]).replace("-", "")
+          event = os.environ["GITHUB_EVENT_NAME"]
+          cron = os.environ.get("GITHUB_EVENT_SCHEDULE", "").strip()
+          if event == "schedule":
+              fields = cron.split()
+              if len(fields) != 5 or fields[0] != "0" or fields[2:] != ["*", "*", "*"]:
+                  raise SystemExit("Unexpected V12 scheduled cron: " + cron)
+              local_hour = (int(fields[1]) + 8) % 24
+              if local_hour not in (8, 10, 16, 20, 22):
+                  raise SystemExit("Schedule does not map to an approved Beijing slot")
+              slot = f"{day}-{local_hour:02d}00"
+          else:
+              slot = f"{day}-manual-{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
+          feed["delivery"] = {
+              "notify": True,
+              "slot": slot,
+              "event": event,
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "schedule_cron": cron or None,
+          }
+          with open(path, "w", encoding="utf-8") as stream:
+              json.dump(feed, stream, ensure_ascii=False, separators=(",", ":"))
+              stream.write("\n")
+          print("Attached delivery slot:", slot)
+          PY
       - name: Save history cache
         if: always() && steps.scan.outcome != 'skipped'
         uses: actions/cache/save@v4
@@ -49,6 +90,26 @@ jobs:
       - name: Persist signal state
         if: always() && steps.scan.outcome == 'success'
         run: bash tools/persist_v12_state.sh "chore(v12): persist signal state" v12/.signal-state.json v12/public-signals.json
+      - name: Publish complete signal snapshot to Bark repository
+        if: steps.scan.outcome == 'success'
+        env:
+          BARK_REPO_TOKEN: ${{ secrets.BARK_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$BARK_REPO_TOKEN" || { echo "::error::BARK_REPO_TOKEN is missing"; exit 1; }
+          AUTH="$(printf 'x-access-token:%s' "$BARK_REPO_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $AUTH" clone --depth 1 https://github.com/MraJJqq/Bark.git /tmp/vegas-bark
+          install -m 644 v12/public-signals.json /tmp/vegas-bark/public-signals.json
+          cd /tmp/vegas-bark
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public-signals.json
+          if git diff --cached --quiet; then
+            echo "Bark already contains this exact scan snapshot."
+            exit 0
+          fi
+          git commit -m "publish(v12): update complete signal snapshot"
+          git -c http.extraheader="AUTHORIZATION: basic $AUTH" push origin HEAD:main
       - name: Upload scan report
         if: always() && steps.scan.outcome != 'skipped'
         uses: actions/upload-artifact@v4
