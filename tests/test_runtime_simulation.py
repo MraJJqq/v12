@@ -79,8 +79,8 @@ class RuntimeSimulationTests(unittest.TestCase):
             state_path = os.path.join(folder, "bark-state.json")
             pending_path = os.path.join(folder, "bark-pending.json")
             report = {
-                "signal_day": "2026-11-05",
-                "started_at": "2026-11-05T08:00:00+08:00",
+                "signal_day": datetime.now(bark.TIMEZONE).date().isoformat(),
+                "started_at": datetime.now(bark.TIMEZONE).date().isoformat() + "T08:00:00+08:00",
                 "signals": [],
             }
             with open(report_path, "w", encoding="utf-8") as stream:
