@@ -2,7 +2,9 @@ import unittest
 
 from datetime import datetime, timezone
 
-from v12.watchdog import _later_success
+from unittest.mock import patch
+
+from v12.watchdog import _later_success, _scan_delivery_state
 
 
 def run(created, event="schedule", conclusion="success", title=""):
@@ -40,6 +42,23 @@ class WatchdogSlotTests(unittest.TestCase):
             title="V12 scan (recovery:20261105-0800)",
         )
         self.assertTrue(_later_success([self.failed, later], self.failed, self.slot_end, self.marker))
+
+
+class WatchdogBarkHealthTests(unittest.TestCase):
+    def _state(self, bark, persist):
+        jobs = {"jobs": [{"steps": [
+            {"name": "Scan Bitget history", "conclusion": "success"},
+            {"name": "Send Bark notification", "conclusion": bark},
+            {"name": "Persist Bark state", "conclusion": persist},
+        ]}]}
+        with patch("v12.watchdog._request", return_value=jobs):
+            return _scan_delivery_state("https://api.github.com/repos/example/v12", {"id": 123})
+
+    def test_bark_accepted_but_state_commit_failed_is_not_rescanned(self):
+        self.assertEqual(self._state("success", "failure"), "delivered_unpersisted")
+
+    def test_bark_failure_is_separated_from_scan_failure(self):
+        self.assertEqual(self._state("failure", "success"), "bark_failed")
 
 
 if __name__ == "__main__":
