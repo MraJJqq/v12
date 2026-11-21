@@ -14,10 +14,16 @@ class BarkSlotDeliveryTests(unittest.TestCase):
         }
         with patch.dict(os.environ, {
             "GITHUB_EVENT_NAME": "schedule",
-            "V12_BARK_SCHEDULE_CRON": "0 0,2,8,12,14 * * *",
+            "V12_BARK_SCHEDULE_CRON": "0 0 * * *",
+            "V12_BARK_RECOVERY_SLOT": "",
         }, clear=False):
             first = _delivery_slot(report)
-            report["started_at"] = "2026-11-21T02:03:00+00:00"
+        report["started_at"] = "2026-11-21T02:03:00+00:00"
+        with patch.dict(os.environ, {
+            "GITHUB_EVENT_NAME": "schedule",
+            "V12_BARK_SCHEDULE_CRON": "0 2 * * *",
+            "V12_BARK_RECOVERY_SLOT": "",
+        }, clear=False):
             second = _delivery_slot(report)
         self.assertEqual(first, "20261121-0800")
         self.assertEqual(second, "20261121-1000")
