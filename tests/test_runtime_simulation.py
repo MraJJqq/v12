@@ -89,7 +89,8 @@ class RuntimeSimulationTests(unittest.TestCase):
             sent = []
             with patch.object(bark, "BARK_STATE_PATH", state_path), \
                  patch.object(bark, "BARK_PENDING_PATH", pending_path), \
-                 patch.object(bark, "_send", side_effect=lambda body, key: sent.append(body)):
+                 patch.object(bark, "_send", side_effect=lambda body, key: sent.append(body)), \
+                 patch.dict(os.environ, {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_RUN_ID": "unit-test-run", "V12_BARK_RECOVERY_SLOT": ""}):
                 self.assertEqual(bark.send_report(report_path), 0)
                 self.assertEqual(bark.send_report(report_path), 0)
 
