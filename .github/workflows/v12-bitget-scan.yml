@@ -8,6 +8,12 @@ on:
     - cron: "0 12 * * *"
     - cron: "0 14 * * *"
   workflow_dispatch:
+    inputs:
+      recovery_slot:
+        description: "Original Beijing scan slot for watchdog recovery"
+        required: false
+        type: string
+        default: ""
 permissions:
   contents: write
 concurrency:
@@ -47,6 +53,7 @@ jobs:
           GITHUB_EVENT_SCHEDULE: ${{ github.event.schedule || '' }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          V12_RECOVERY_SLOT: ${{ inputs.recovery_slot || '' }}
         run: |
           python - <<'PY'
           import json, os
@@ -56,7 +63,11 @@ jobs:
           day = str(feed["signal_day"]).replace("-", "")
           event = os.environ["GITHUB_EVENT_NAME"]
           cron = os.environ.get("GITHUB_EVENT_SCHEDULE", "").strip()
-          if event == "schedule":
+          recovery = os.environ.get("V12_RECOVERY_SLOT", "").strip()
+          if recovery.startswith("recovery:"):
+              slot = recovery.split(":", 1)[1]
+              event = "recovery"
+          elif event == "schedule":
               fields = cron.split()
               if len(fields) != 5 or fields[0] != "0" or fields[2:] != ["*", "*", "*"]:
                   raise SystemExit("Unexpected V12 scheduled cron: " + cron)
@@ -65,9 +76,8 @@ jobs:
                   raise SystemExit("Schedule does not map to an approved Beijing slot")
               slot = f"{day}-{local_hour:02d}00"
           else:
-              slot = f"{day}-manual-{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
-          feed["delivery"] = {
-              "notify": True,
+              slot = f"{day}-manual-{os.environ['GITHUB_RUN_ID']}"
+          feed["scan_context"] = {
               "slot": slot,
               "event": event,
               "run_id": os.environ["GITHUB_RUN_ID"],
@@ -89,14 +99,14 @@ jobs:
         id: persist_signal_state
         if: always() && steps.scan.outcome == 'success'
         run: bash tools/persist_v12_state.sh "chore(v12): persist signal state" v12/.signal-state.json v12/public-signals.json
-      - name: Publish complete signal snapshot to Bark repository
+      - name: Publish complete signal snapshot to relay
         if: always() && steps.scan.outcome == 'success' && steps.persist_signal_state.outcome == 'success'
         env:
-          BARK_REPO_TOKEN: ${{ secrets.BARK_REPO_TOKEN }}
+          SIGNAL_RELAY_TOKEN: ${{ secrets.SIGNAL_RELAY_TOKEN }}
         run: |
           set -euo pipefail
-          test -n "$BARK_REPO_TOKEN" || { echo "::error::BARK_REPO_TOKEN is missing"; exit 1; }
-          AUTH="$(printf 'x-access-token:%s' "$BARK_REPO_TOKEN" | base64 -w0)"
+          test -n "$SIGNAL_RELAY_TOKEN" || { echo "::error::SIGNAL_RELAY_TOKEN is missing"; exit 1; }
+          AUTH="$(printf 'x-access-token:%s' "$SIGNAL_RELAY_TOKEN" | base64 -w0)"
           git -c http.extraheader="AUTHORIZATION: basic $AUTH" clone --depth 1 https://github.com/MraJJqq/Bark.git /tmp/vegas-bark
           install -m 644 v12/public-signals.json /tmp/vegas-bark/public-signals.json
           cd /tmp/vegas-bark
