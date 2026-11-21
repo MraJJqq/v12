@@ -108,14 +108,14 @@ jobs:
           set -euo pipefail
           test -n "$SIGNAL_RELAY_TOKEN" || { echo "::error::SIGNAL_RELAY_TOKEN is missing"; exit 1; }
           AUTH="$(printf 'x-access-token:%s' "$SIGNAL_RELAY_TOKEN" | base64 -w0)"
-          git -c http.extraheader="AUTHORIZATION: basic $AUTH" clone --depth 1 https://github.com/MraJJqq/Bark.git /tmp/vegas-bark
+          git -c http.extraheader="AUTHORIZATION: basic $AUTH" clone --depth 1 https://github.com/MraJJqq/Bark.git /tmp/vegas-signal-relay
           install -m 644 v12/public-signals.json /tmp/vegas-bark/public-signals.json
           cd /tmp/vegas-bark
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add public-signals.json
           if git diff --cached --quiet; then
-            echo "Bark already contains this exact scan snapshot."
+            echo "Signal relay already contains this exact scan snapshot."
             exit 0
           fi
           git commit -m "publish(v12): update complete signal snapshot"

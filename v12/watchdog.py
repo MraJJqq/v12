@@ -1,4 +1,4 @@
-"""V12 scan-only watchdog. It recovers failed scans/publication without Bark coupling."""
+"""V12 scan-only watchdog for scheduled scan and publication recovery."""
 import json
 import os
 import urllib.request
