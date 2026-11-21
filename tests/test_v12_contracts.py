@@ -92,11 +92,13 @@ class BarkTests(unittest.TestCase):
             report_path=os.path.join(folder,"report.json")
             pending_path=os.path.join(folder,"pending.json")
             state_path=os.path.join(folder,"state.json")
-            report={"signal_day":"2026-11-05","started_at":"2026-11-05T08:00:00+08:00","signals":[]}
+            from datetime import datetime
+            day=datetime.now(bark.TIMEZONE).date().isoformat()
+            report={"signal_day":day,"started_at":day+"T08:00:00+08:00","signals":[]}
             with patch.object(bark,"BARK_PENDING_PATH",pending_path),patch.object(bark,"BARK_STATE_PATH",state_path),patch.object(bark,"_send") as send,patch.dict(os.environ,{"GITHUB_EVENT_NAME":"schedule","GITHUB_RUN_ID":"","V12_BARK_RECOVERY_SLOT":"","V12_BARK_SCHEDULE_CRON":"0 0,2,8,12,14 * * *"}):
                 with open(report_path,"w",encoding="utf-8") as stream: json.dump(report,stream)
                 self.assertEqual(send_report(report_path),0)
-                report["started_at"]="2026-11-05T10:00:00+08:00"
+                report["started_at"]=day+"T10:00:00+08:00"
                 with open(report_path,"w",encoding="utf-8") as stream: json.dump(report,stream)
                 self.assertEqual(send_report(report_path),0)
                 self.assertEqual(send_report(report_path),0)
