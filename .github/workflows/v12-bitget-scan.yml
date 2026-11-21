@@ -50,8 +50,6 @@ jobs:
         run: |
           python - <<'PY'
           import json, os
-          from datetime import datetime
-          from zoneinfo import ZoneInfo
           path = "v12/public-signals.json"
           with open(path, encoding="utf-8") as stream:
               feed = json.load(stream)
@@ -92,7 +90,7 @@ jobs:
         if: always() && steps.scan.outcome == 'success'
         run: bash tools/persist_v12_state.sh "chore(v12): persist signal state" v12/.signal-state.json v12/public-signals.json
       - name: Publish complete signal snapshot to Bark repository
-        if: steps.scan.outcome == 'success'
+        if: always() && steps.scan.outcome == 'success' && steps.persist_signal_state.outcome == 'success'
         env:
           BARK_REPO_TOKEN: ${{ secrets.BARK_REPO_TOKEN }}
         run: |
