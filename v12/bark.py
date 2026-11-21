@@ -294,15 +294,17 @@ def _delivery_slot(report):
         return recovery.split(":",1)[1]
     cron=os.environ.get("V12_BARK_SCHEDULE_CRON","").strip()
     if os.environ.get("GITHUB_EVENT_NAME")=="schedule" and cron:
-        fields=cron.split()
-        if len(fields)>=3 and fields[0]=="0":
-            try:
-                utc_hour=int(fields[1])
-                local_hour=(utc_hour+8)%24
-                day=str(report.get("signal_day") or _date(report)).replace("-","")
-                return f"{day}-{local_hour:02d}00"
-            except (TypeError,ValueError):
-                pass
+        try:
+            stamp=datetime.fromisoformat(str(report["started_at"]).replace("Z","+00:00"))
+            if stamp.tzinfo is None:
+                stamp=stamp.replace(tzinfo=TIMEZONE)
+            local=stamp.astimezone(TIMEZONE)
+            day=str(report.get("signal_day") or local.date().isoformat()).replace("-","")
+            hours=(8,10,16,20,22)
+            hour=min(hours,key=lambda candidate:abs(candidate-local.hour))
+            return f"{day}-{hour:02d}00"
+        except (KeyError,TypeError,ValueError):
+            pass
     run_id=os.environ.get("GITHUB_RUN_ID","").strip()
     if run_id:
         day=str(report.get("signal_day") or _date(report)).replace("-","")
