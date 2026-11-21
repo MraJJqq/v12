@@ -1,4 +1,5 @@
 name: VEGAS V12 Bitget Scan
+run-name: V12 scan (${{ inputs.recovery_slot || github.event_name }})
 on:
   schedule:
     # Beijing time (UTC+8): 08:00, 10:00, 16:00, 20:00, 22:00
@@ -46,7 +47,7 @@ jobs:
         env:
           V12_REPORT_PATH: v12/scan-report.json
         run: python -m v12.scanner
-      - name: Attach delivery identity to complete scan snapshot
+      - name: Attach scan identity to complete scan snapshot
         if: steps.scan.outcome == 'success'
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
@@ -87,7 +88,7 @@ jobs:
           with open(path, "w", encoding="utf-8") as stream:
               json.dump(feed, stream, ensure_ascii=False, separators=(",", ":"))
               stream.write("\n")
-          print("Attached delivery slot:", slot)
+          print("Attached scan slot:", slot)
           PY
       - name: Save history cache
         if: always() && steps.scan.outcome != 'skipped'

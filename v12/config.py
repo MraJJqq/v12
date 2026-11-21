@@ -16,3 +16,6 @@ STATE_PATH="v12/.signal-state.json"
 REPORT_PATH="v12/scan-report.json"
 PUBLIC_FEED_PATH="v12/public-signals.json"
 CACHE_DIR=".cache/v12-candles"
+
+SCAN_HOURS_BEIJING=(8,10,16,20,22)
+WATCHDOG_GRACE_MINUTES=10

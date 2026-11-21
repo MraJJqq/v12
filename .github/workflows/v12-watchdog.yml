@@ -1,0 +1,33 @@
+name: V12 Scan Watchdog
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+concurrency:
+  group: v12-scan-watchdog
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    if: vars.V12_ENABLED == 'true' && vars.V12_LAUNCH_APPROVED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Monitor scheduled scans and dispatch bounded recovery
+        env:
+          GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: \${{ github.repository }}
+        run: python -m v12.watchdog
