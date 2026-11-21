@@ -71,8 +71,20 @@ def _load(path):
     value=load_json(path,{})
     return value if isinstance(value,dict) else {}
 
-def _save_ok(fingerprint,day,path=None):
-    atomic_write_json(path or BARK_STATE_PATH,{"fingerprint":fingerprint,"date":day,"accepted_at":datetime.now(TIMEZONE).isoformat()})
+def _save_ok(fingerprint,day,path=None,slot=None):
+    target=path or BARK_STATE_PATH
+    state=_load(target)
+    accepted_at=datetime.now(TIMEZONE).isoformat()
+    deliveries=state.get("deliveries",{})
+    if not isinstance(deliveries,dict):
+        deliveries={}
+    if slot:
+        deliveries[slot]={"fingerprint":fingerprint,"date":day,"accepted_at":accepted_at}
+    # Keep a bounded history; slot keys begin with YYYYMMDD.
+    cutoff=(datetime.now(TIMEZONE).date()-timedelta(days=14)).isoformat().replace("-","")
+    deliveries={key:value for key,value in deliveries.items()
+        if not str(key[:8]).isdigit() or str(key[:8])>=cutoff}
+    atomic_write_json(target,{"fingerprint":fingerprint,"date":day,"accepted_at":accepted_at,"deliveries":deliveries})
 
 def _pending_queue():
     state=_load(BARK_PENDING_PATH)
@@ -84,12 +96,12 @@ def _pending_queue():
 def _save_pending_queue(queue):
     atomic_write_json(BARK_PENDING_PATH,{"pending":queue})
 
-def _pending(fingerprint,day,body,symbols,status="sending",error=None,*,kind="scan",retry_after=None,retry_attempts=None,next_retry_at=None):
+def _pending(fingerprint,day,body,symbols,status="sending",error=None,*,kind="scan",retry_after=None,retry_attempts=None,next_retry_at=None,slot=None):
     queue=_pending_queue()
     previous=next((item for item in queue if item.get("fingerprint")==fingerprint),{})
     attempts=previous.get("retry_attempts",0) if retry_attempts is None else retry_attempts
     record={"fingerprint":fingerprint,"date":day,"body":body,"symbols":symbols,
-        "kind":kind,"status":status,"error":error,"retry_attempts":attempts,
+        "kind":kind,"slot":slot,"status":status,"error":error,"retry_attempts":attempts,
         "retry_after":retry_after,"next_retry_at":next_retry_at,
         "updated_at":datetime.now(TIMEZONE).isoformat()}
     for index,item in enumerate(queue):
@@ -175,8 +187,12 @@ def _state_path(kind="scan"):
     return BARK_WATCHDOG_STATE_PATH if kind == "watchdog" else BARK_STATE_PATH
 
 
-def _accepted(fingerprint,day,path=None):
+def _accepted(fingerprint,day,path=None,slot=None):
     state=_load(path or BARK_STATE_PATH)
+    if slot:
+        deliveries=state.get("deliveries",{})
+        record=deliveries.get(slot) if isinstance(deliveries,dict) else None
+        return isinstance(record,dict) and record.get("date")==day and record.get("fingerprint")==fingerprint
     return state.get("date")==day and state.get("fingerprint")==fingerprint
 
 
@@ -234,7 +250,7 @@ def retry_pending():
             _save_pending_queue(remaining+future)
             continue
         state_path=_state_path(pending.get("kind","scan"))
-        if _accepted(fingerprint,day,state_path):
+        if _accepted(fingerprint,day,state_path,pending.get("slot")):
             print("Already accepted; duplicate retry suppressed.")
             _save_pending_queue(remaining+future)
             continue
@@ -266,10 +282,34 @@ def retry_pending():
             failed=True
             print(f"ERROR: V12 Bark retry failed: {exc}",file=sys.stderr)
         else:
-            _save_ok(fingerprint,day,state_path)
+            _save_ok(fingerprint,day,state_path,pending.get("slot"))
             print("V12 Bark retry accepted.")
         _save_pending_queue(remaining+future)
     return 1 if failed else 0
+
+def _delivery_slot(report):
+    """Stable idempotency scope: one accepted notice per scheduled Beijing slot."""
+    recovery=os.environ.get("V12_BARK_RECOVERY_SLOT","").strip()
+    if recovery.startswith("recovery:"):
+        return recovery.split(":",1)[1]
+    cron=os.environ.get("V12_BARK_SCHEDULE_CRON","").strip()
+    if os.environ.get("GITHUB_EVENT_NAME")=="schedule" and cron:
+        fields=cron.split()
+        if len(fields)>=3 and fields[0]=="0":
+            try:
+                utc_hour=int(fields[1])
+                local_hour=(utc_hour+8)%24
+                day=str(report.get("signal_day") or _date(report)).replace("-","")
+                return f"{day}-{local_hour:02d}00"
+            except (TypeError,ValueError):
+                pass
+    run_id=os.environ.get("GITHUB_RUN_ID","").strip()
+    if run_id:
+        day=str(report.get("signal_day") or _date(report)).replace("-","")
+        return f"{day}-manual-{run_id}"
+    # Local/test invocation remains unique to the report's start timestamp.
+    return str(report.get("started_at") or datetime.now(TIMEZONE).isoformat())
+
 
 def send_report(path):
     try:
@@ -277,25 +317,25 @@ def send_report(path):
         if not isinstance(report,dict) or not isinstance(report.get("signals",[]),list):
             raise ValueError("Invalid V12 scan report")
         body,symbols=build_body(report); day=_date(report)
-        scan_id=str(report.get("started_at") or datetime.now(TIMEZONE).isoformat())
-        fingerprint=hashlib.sha256(f"{day}\n{scan_id}\n{body}".encode()).hexdigest()
-        if _accepted(fingerprint,day):
+        slot=_delivery_slot(report)
+        fingerprint=hashlib.sha256(f"{day}\n{slot}\n{body}".encode()).hexdigest()
+        if _accepted(fingerprint,day,slot=slot):
             _clear(fingerprint)
             print("V12 Bark content unchanged; duplicate notification suppressed."); return 0
         previous=next((item for item in _pending_queue() if item.get("fingerprint")==fingerprint),None)
         if previous and previous.get("status") in ("sending","uncertain","retryable"):
             print("Matching Bark delivery is unresolved; duplicate send suppressed."); return 1
-        _pending(fingerprint,day,body,symbols,"sending")
+        _pending(fingerprint,day,body,symbols,"sending",slot=slot)
         try:_send(body,os.environ.get("V12_BARK_KEY","").strip())
         except DeliveryError as exc:
             status="uncertain" if exc.uncertain else ("retryable" if exc.retryable else "rejected")
             attempts=1 if exc.retryable else 0
             due=_retry_at(exc.retry_after,attempts) if exc.retryable else None
             _pending(fingerprint,day,body,symbols,status,str(exc),kind="scan",
-                retry_after=exc.retry_after,retry_attempts=attempts,next_retry_at=due); raise
+                retry_after=exc.retry_after,retry_attempts=attempts,next_retry_at=due,slot=slot); raise
         except Exception as exc:
             _pending(fingerprint,day,body,symbols,"rejected",str(exc),kind="scan"); raise
-        _save_ok(fingerprint,day); _clear(fingerprint)
+        _save_ok(fingerprint,day,slot=slot); _clear(fingerprint)
         print("V12 Bark accepted; "+(", ".join(symbols) if symbols else "No change")); return 0
     except Exception as exc:
         print(f"ERROR: V12 Bark notification failed: {exc}",file=sys.stderr); return 1
