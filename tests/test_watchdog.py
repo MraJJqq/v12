@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from v12.watchdog import _later_success, _scan_delivery_state
+from v12.config import WATCHDOG_GRACE_MINUTES
 
 
 def run(created, event="schedule", conclusion="success", title=""):
@@ -18,6 +19,9 @@ def run(created, event="schedule", conclusion="success", title=""):
 
 
 class WatchdogSlotTests(unittest.TestCase):
+    def test_watchdog_grace_is_ten_minutes(self):
+        self.assertEqual(WATCHDOG_GRACE_MINUTES, 10)
+
     def setUp(self):
         self.failed = run("2026-11-05T00:05:00Z", conclusion="failure")
         self.slot_end = datetime(2026, 11, 5, 1, 50, tzinfo=timezone.utc)
