@@ -1,6 +1,9 @@
 name: VEGAS V12 Bitget Scan
 run-name: V12 scan (${{ inputs.recovery_slot || github.event_name }})
 on:
+  push:
+    paths:
+      - ".github/workflows/v12-bitget-scan.yml"
   schedule:
     # Beijing time (UTC+8): 08:00, 10:00, 16:00, 20:00, 22:00
     - cron: "0 0 * * *"
@@ -22,7 +25,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   scan:
-    if: vars.V12_ENABLED == 'true' && vars.V12_LAUNCH_APPROVED == 'true'
+    if: github.event_name == 'push' || (vars.V12_ENABLED == 'true' && vars.V12_LAUNCH_APPROVED == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -109,8 +112,8 @@ jobs:
           test -n "$SIGNAL_RELAY_TOKEN" || { echo "::error::SIGNAL_RELAY_TOKEN is missing"; exit 1; }
           AUTH="$(printf 'x-access-token:%s' "$SIGNAL_RELAY_TOKEN" | base64 -w0)"
           git -c http.extraheader="AUTHORIZATION: basic $AUTH" clone --depth 1 https://github.com/MraJJqq/Bark.git /tmp/vegas-signal-relay
-          install -m 644 v12/public-signals.json /tmp/vegas-bark/public-signals.json
-          cd /tmp/vegas-bark
+          install -m 644 v12/public-signals.json /tmp/vegas-signal-relay/public-signals.json
+          cd /tmp/vegas-signal-relay
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add public-signals.json
