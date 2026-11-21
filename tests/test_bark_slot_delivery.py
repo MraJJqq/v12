@@ -23,6 +23,15 @@ class BarkSlotDeliveryTests(unittest.TestCase):
         self.assertEqual(second, "20261121-1000")
         self.assertNotEqual(first, second)
 
+    def test_schedule_cron_maps_exact_utc_hour(self):
+        report={"signal_day":"2026-11-21","started_at":"2026-11-21T01:58:00+00:00"}
+        with patch.dict(os.environ, {
+            "GITHUB_EVENT_NAME":"schedule",
+            "V12_BARK_SCHEDULE_CRON":"0 0 * * *",
+            "V12_BARK_RECOVERY_SLOT":"",
+        }, clear=False):
+            self.assertEqual(_delivery_slot(report),"20261121-0800")
+
     def test_recovery_uses_the_original_slot_identity(self):
         with patch.dict(os.environ, {
             "V12_BARK_RECOVERY_SLOT": "recovery:20261121-0800",

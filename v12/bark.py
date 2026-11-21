@@ -254,9 +254,42 @@ def retry_pending():
             print("Already accepted; duplicate retry suppressed.")
             _save_pending_queue(remaining+future)
             continue
-        if pending.get("status","sending")!="retryable" or not _retry_due(pending):
+        status=pending.get("status","sending")
+        if status=="sending":
+            try:
+                updated=datetime.fromisoformat(str(pending.get("updated_at","")).replace("Z","+00:00"))
+                if updated.tzinfo is None:
+                    updated=updated.replace(tzinfo=TIMEZONE)
+                age=(datetime.now(TIMEZONE)-updated.astimezone(TIMEZONE)).total_seconds()
+            except (TypeError,ValueError):
+                age=1801
+            if age>1800:
+                pending=dict(pending)
+                pending.update({"status":"uncertain","error":"Stale sending intent; delivery outcome requires manual reconciliation.","updated_at":datetime.now(TIMEZONE).isoformat()})
+                print(f"ALERT: stale Bark sending intent requires manual review: {fingerprint}",file=sys.stderr)
+                failed=True
             remaining.append(pending)
             _save_pending_queue(remaining+future)
+            continue
+        if status=="rejected":
+            pending=dict(pending)
+            pending.update({"status":"dead_letter","error":pending.get("error") or "Permanent Bark rejection.","updated_at":datetime.now(TIMEZONE).isoformat()})
+            print(f"ALERT: rejected Bark notice archived: {fingerprint}",file=sys.stderr)
+            remaining.append(pending)
+            _save_pending_queue(remaining+future)
+            failed=True
+            continue
+        if status!="retryable" or not _retry_due(pending):
+            remaining.append(pending)
+            _save_pending_queue(remaining+future)
+            continue
+        if int(pending.get("retry_attempts",0))>=5:
+            pending=dict(pending)
+            pending.update({"status":"dead_letter","error":"Maximum Bark retry attempts reached.","updated_at":datetime.now(TIMEZONE).isoformat()})
+            print(f"ALERT: Bark retry moved to dead letter: {fingerprint}",file=sys.stderr)
+            remaining.append(pending)
+            _save_pending_queue(remaining+future)
+            failed=True
             continue
         pending=dict(pending)
         pending.update({"status":"sending","updated_at":datetime.now(TIMEZONE).isoformat()})
@@ -267,7 +300,8 @@ def retry_pending():
             pending=dict(pending)
             if exc.retryable:
                 attempts=int(pending.get("retry_attempts",0))+1
-                pending.update({"status":"retryable","retry_attempts":attempts,
+                next_status="retryable" if attempts<5 else "dead_letter"
+                pending.update({"status":next_status,"retry_attempts":attempts,
                     "retry_after":exc.retry_after,"next_retry_at":_retry_at(exc.retry_after,attempts)})
             else:
                 pending.update({"status":"uncertain" if exc.uncertain else "rejected"})
@@ -288,29 +322,94 @@ def retry_pending():
     return 1 if failed else 0
 
 def _delivery_slot(report):
-    """Stable idempotency scope: one accepted notice per scheduled Beijing slot."""
+    """Map the exact GitHub schedule cron to its Beijing slot."""
     recovery=os.environ.get("V12_BARK_RECOVERY_SLOT","").strip()
     if recovery.startswith("recovery:"):
         return recovery.split(":",1)[1]
     cron=os.environ.get("V12_BARK_SCHEDULE_CRON","").strip()
     if os.environ.get("GITHUB_EVENT_NAME")=="schedule" and cron:
-        try:
-            stamp=datetime.fromisoformat(str(report["started_at"]).replace("Z","+00:00"))
-            if stamp.tzinfo is None:
-                stamp=stamp.replace(tzinfo=TIMEZONE)
-            local=stamp.astimezone(TIMEZONE)
-            day=str(report.get("signal_day") or local.date().isoformat()).replace("-","")
-            hours=(8,10,16,20,22)
-            hour=min(hours,key=lambda candidate:abs(candidate-local.hour))
-            return f"{day}-{hour:02d}00"
-        except (KeyError,TypeError,ValueError):
-            pass
+        fields=cron.split()
+        if len(fields)==5 and fields[0]=="0" and fields[2:]==["*","*","*"]:
+            try:
+                utc_hour=int(fields[1])
+                local_hour=(utc_hour+8)%24
+                if local_hour in (8,10,16,20,22):
+                    stamp=datetime.fromisoformat(str(report["started_at"]).replace("Z","+00:00"))
+                    if stamp.tzinfo is None:
+                        stamp=stamp.replace(tzinfo=TIMEZONE)
+                    local_day=str(report.get("signal_day") or stamp.astimezone(TIMEZONE).date().isoformat()).replace("-","")
+                    return f"{local_day}-{local_hour:02d}00"
+            except (KeyError,TypeError,ValueError):
+                pass
     run_id=os.environ.get("GITHUB_RUN_ID","").strip()
     if run_id:
         day=str(report.get("signal_day") or _date(report)).replace("-","")
         return f"{day}-manual-{run_id}"
-    # Local/test invocation remains unique to the report's start timestamp.
     return str(report.get("started_at") or datetime.now(TIMEZONE).isoformat())
+
+
+def _report_delivery(path):
+    with open(path,encoding="utf-8") as stream:
+        report=json.load(stream)
+    if not isinstance(report,dict) or not isinstance(report.get("signals",[]),list):
+        raise ValueError("Invalid V12 scan report")
+    body,symbols=build_body(report)
+    day=_date(report)
+    slot=_delivery_slot(report)
+    fingerprint=hashlib.sha256(f"{day}\\n{slot}\\n{body}".encode()).hexdigest()
+    return body,symbols,day,slot,fingerprint
+
+
+def prepare_report(path):
+    """Write the delivery intent before the Bark POST is allowed to run."""
+    try:
+        body,symbols,day,slot,fingerprint=_report_delivery(path)
+        if _accepted(fingerprint,day,slot=slot):
+            print("V12 Bark already accepted for this slot; duplicate suppressed.")
+            return 0
+        previous=next((item for item in _pending_queue() if item.get("fingerprint")==fingerprint),None)
+        if previous:
+            print(f"V12 Bark delivery already recorded as {previous.get('status')}; refusing duplicate send.")
+            return 1
+        _pending(fingerprint,day,body,symbols,"sending",kind="scan",slot=slot)
+        print(f"Prepared durable Bark intent for {slot}; delivery waits for GitHub commit.")
+        return 0
+    except Exception as exc:
+        print(f"ERROR: V12 Bark prepare failed: {exc}",file=sys.stderr)
+        return 1
+
+
+def deliver_prepared(path):
+    """Send only after the workflow has committed the sending intent."""
+    try:
+        body,symbols,day,slot,fingerprint=_report_delivery(path)
+        if _accepted(fingerprint,day,slot=slot):
+            _clear(fingerprint)
+            print("V12 Bark already accepted; duplicate suppressed.")
+            return 0
+        intent=next((item for item in _pending_queue()
+            if item.get("fingerprint")==fingerprint and item.get("status")=="sending"),None)
+        if not intent:
+            raise RuntimeError("Durable Bark sending intent missing; refusing to POST.")
+        try:
+            _send(body,os.environ.get("V12_BARK_KEY","").strip())
+        except DeliveryError as exc:
+            status="uncertain" if exc.uncertain else ("retryable" if exc.retryable else "rejected")
+            attempts=1 if exc.retryable else 0
+            due=_retry_at(exc.retry_after,attempts) if exc.retryable else None
+            _pending(fingerprint,day,body,symbols,status,str(exc),kind="scan",
+                retry_after=exc.retry_after,retry_attempts=attempts,next_retry_at=due,slot=slot)
+            raise
+        except Exception as exc:
+            _pending(fingerprint,day,body,symbols,"rejected",str(exc),kind="scan",slot=slot)
+            raise
+        _save_ok(fingerprint,day,slot=slot)
+        _clear(fingerprint)
+        print("V12 Bark accepted; "+(", ".join(symbols) if symbols else "No change"))
+        return 0
+    except Exception as exc:
+        print(f"ERROR: V12 Bark notification failed: {exc}",file=sys.stderr)
+        return 1
 
 
 def send_report(path):
@@ -325,7 +424,7 @@ def send_report(path):
             _clear(fingerprint)
             print("V12 Bark content unchanged; duplicate notification suppressed."); return 0
         previous=next((item for item in _pending_queue() if item.get("fingerprint")==fingerprint),None)
-        if previous and previous.get("status") in ("sending","uncertain","retryable"):
+        if previous and previous.get("status") in ("sending","uncertain","retryable","rejected","dead_letter"):
             print("Matching Bark delivery is unresolved; duplicate send suppressed."); return 1
         _pending(fingerprint,day,body,symbols,"sending",slot=slot)
         try:_send(body,os.environ.get("V12_BARK_KEY","").strip())
@@ -392,6 +491,10 @@ def process_watchdog_issues():
     return 1 if failed else 0
 
 if __name__=="__main__":
+    if len(sys.argv)>1 and sys.argv[1]=="--prepare-report":
+        sys.exit(prepare_report(sys.argv[2] if len(sys.argv)>2 else REPORT_PATH))
+    if len(sys.argv)>1 and sys.argv[1]=="--deliver-prepared":
+        sys.exit(deliver_prepared(sys.argv[2] if len(sys.argv)>2 else REPORT_PATH))
     if len(sys.argv)>1 and sys.argv[1]=="--retry-pending":
         sys.exit(retry_pending())
     if len(sys.argv)>1 and sys.argv[1]=="--process-watchdog-issues":
