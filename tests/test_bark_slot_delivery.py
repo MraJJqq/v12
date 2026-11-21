@@ -38,6 +38,34 @@ class BarkSlotDeliveryTests(unittest.TestCase):
         }, clear=False):
             self.assertEqual(_delivery_slot(report),"20261121-0800")
 
+    def test_prepare_commits_intent_before_delivery_and_keeps_legacy_fingerprint(self):
+        import hashlib
+        import json
+        from v12 import bark
+        with tempfile.TemporaryDirectory() as folder:
+            report_path=os.path.join(folder,"report.json")
+            pending_path=os.path.join(folder,"pending.json")
+            state_path=os.path.join(folder,"state.json")
+            report={"signal_day":"2026-11-21","started_at":"2026-11-21T00:00:00+00:00","signals":[]}
+            with open(report_path,"w",encoding="utf-8") as stream:
+                json.dump(report,stream)
+            env={"GITHUB_EVENT_NAME":"schedule","V12_BARK_SCHEDULE_CRON":"0 0 * * *",
+                 "V12_BARK_RECOVERY_SLOT":"","GITHUB_RUN_ID":"","V12_BARK_KEY":"test-key"}
+            with patch.object(bark,"BARK_PENDING_PATH",pending_path), \
+                 patch.object(bark,"BARK_STATE_PATH",state_path), \
+                 patch.dict(os.environ,env,clear=False), patch.object(bark,"_send") as send:
+                self.assertEqual(bark.prepare_report(report_path),0)
+                send.assert_not_called()
+                with open(pending_path,encoding="utf-8") as stream:
+                    item=json.load(stream)["pending"][0]
+                body,_,day,slot,fingerprint=bark._report_delivery(report_path)
+                expected=hashlib.sha256(f"{day}\\n{slot}\\n{body}".encode()).hexdigest()
+                self.assertEqual(fingerprint,expected)
+                self.assertEqual(item["status"],"sending")
+                self.assertEqual(bark.deliver_prepared(report_path),0)
+                send.assert_called_once_with(body,"test-key")
+                self.assertTrue(bark._accepted(fingerprint,day,slot=slot))
+
     def test_recovery_uses_the_original_slot_identity(self):
         with patch.dict(os.environ, {
             "V12_BARK_RECOVERY_SLOT": "recovery:20261121-0800",

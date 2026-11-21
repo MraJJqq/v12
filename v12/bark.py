@@ -356,7 +356,7 @@ def _report_delivery(path):
     body,symbols=build_body(report)
     day=_date(report)
     slot=_delivery_slot(report)
-    fingerprint=hashlib.sha256(f"{day}\\n{slot}\\n{body}".encode()).hexdigest()
+    fingerprint=hashlib.sha256(f"{day}\n{slot}\n{body}".encode()).hexdigest()
     return body,symbols,day,slot,fingerprint
 
 
