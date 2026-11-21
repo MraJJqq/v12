@@ -1,5 +1,4 @@
 name: VEGAS V12 Bitget Scan
-run-name: V12 scan (${{ github.event_name == 'schedule' && 'scheduled' || inputs.recovery_slot || 'manual' }})
 on:
   schedule:
     # Beijing time (UTC+8): 08:00, 10:00, 16:00, 20:00, 22:00
@@ -9,12 +8,6 @@ on:
     - cron: "0 12 * * *"
     - cron: "0 14 * * *"
   workflow_dispatch:
-    inputs:
-      recovery_slot:
-        description: "Watchdog recovery slot marker (leave empty for manual runs)"
-        required: false
-        type: string
-        default: ""
 permissions:
   contents: write
 concurrency:
@@ -34,10 +27,6 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: requirements.txt
-      - name: Validate V12 Bark secret
-        env:
-          V12_BARK_KEY: ${{ secrets.V12_BARK_KEY }}
-        run: test -n "$V12_BARK_KEY" || { echo "::error::V12_BARK_KEY is missing"; exit 1; }
       - name: Restore Bitget history cache
         uses: actions/cache/restore@v4
         with:
@@ -60,32 +49,6 @@ jobs:
       - name: Persist signal state
         if: always() && steps.scan.outcome == 'success'
         run: bash tools/persist_v12_state.sh "chore(v12): persist signal state" v12/.signal-state.json v12/public-signals.json
-      - name: Prepare Bark delivery intent
-        id: bark_prepare
-        if: always() && steps.scan.outcome == 'success'
-        env:
-          V12_BARK_RECOVERY_SLOT: ${{ inputs.recovery_slot || '' }}
-          V12_BARK_SCHEDULE_CRON: ${{ github.event.schedule || '' }}
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-        run: python -m v12.bark --prepare-report v12/scan-report.json
-      - name: Persist Bark delivery intent
-        id: bark_intent
-        if: always() && steps.bark_prepare.outcome == 'success'
-        run: bash tools/persist_v12_state.sh "chore(v12): persist Bark delivery intent" v12/.bark-pending-notification-state.json
-      - name: Send Bark notification
-        id: bark
-        if: always() && steps.bark_intent.outcome == 'success'
-        env:
-          V12_BARK_KEY: ${{ secrets.V12_BARK_KEY }}
-          V12_BARK_RECOVERY_SLOT: ${{ inputs.recovery_slot || '' }}
-          V12_BARK_SCHEDULE_CRON: ${{ github.event.schedule || '' }}
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-        run: python -m v12.bark --deliver-prepared v12/scan-report.json
-      - name: Persist Bark state
-        if: always() && steps.bark.outcome != 'skipped' && steps.bark.outcome != ''
-        run: bash tools/persist_v12_state.sh "chore(v12): persist Bark state" v12/.bark-notification-state.json v12/.bark-pending-notification-state.json
       - name: Upload scan report
         if: always() && steps.scan.outcome != 'skipped'
         uses: actions/upload-artifact@v4

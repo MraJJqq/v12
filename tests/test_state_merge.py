@@ -27,22 +27,6 @@ class StateMergeTests(unittest.TestCase):
         result = merge("v12/.signal-state.json", local, remote)
         self.assertEqual(result["__daily_formal_signals__"], {"date": "2026-11-22", "signals": []})
 
-    def test_bark_slot_deliveries_are_merged_without_losing_other_slots(self):
-        local = {"deliveries": {"20261121-1000": {"fingerprint": "b", "date": "2026-11-21", "accepted_at": "2026-11-21T10:00:00+08:00"}}}
-        remote = {"deliveries": {"20261121-0800": {"fingerprint": "a", "date": "2026-11-21", "accepted_at": "2026-11-21T08:00:00+08:00"}}}
-        result = merge("v12/.bark-notification-state.json", local, remote)
-        self.assertEqual(set(result["deliveries"]), {"20261121-0800", "20261121-1000"})
-
-    def test_pending_queue_merges_by_fingerprint_and_latest_update(self):
-        local = {"pending": [{"fingerprint": "a", "status": "sending", "updated_at": "2026-11-21T10:00:00+08:00"}]}
-        remote = {"pending": [
-            {"fingerprint": "a", "status": "retryable", "updated_at": "2026-11-21T09:00:00+08:00"},
-            {"fingerprint": "b", "status": "retryable", "updated_at": "2026-11-21T09:00:00+08:00"}
-        ]}
-        result = merge("v12/.bark-pending-notification-state.json", local, remote)
-        self.assertEqual({x["fingerprint"] for x in result["pending"]}, {"a", "b"})
-        self.assertEqual(next(x for x in result["pending"] if x["fingerprint"] == "a")["status"], "sending")
-
     def test_public_feed_handles_missing_timestamps(self):
         result = merge("v12/public-signals.json", {"signals": ["local"]}, {"signals": ["remote"]})
         self.assertIn(result["signals"], (["local"], ["remote"]))

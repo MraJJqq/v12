@@ -60,42 +60,6 @@ def signal_state(local, remote):
     return result
 
 
-def accepted_state(local, remote):
-    result = {**remote, **local}
-    deliveries = {}
-    for source in (remote, local):
-        entries = source.get("deliveries", {})
-        if isinstance(entries, dict):
-            for slot, record in entries.items():
-                if not isinstance(record, dict): continue
-                old = deliveries.get(slot)
-                if old is None or stamp(record.get("accepted_at")) >= stamp(old.get("accepted_at")):
-                    deliveries[slot] = record
-    if deliveries:
-        result["deliveries"] = deliveries
-    newest = max((remote, local), key=lambda x: stamp(x.get("accepted_at")))
-    for key in ("fingerprint", "date", "accepted_at"):
-        if key in newest:
-            result[key] = newest[key]
-    return result
-
-
-def pending_state(local, remote):
-    records = {}
-    for source in (remote, local):
-        queue = source.get("pending", [])
-        if not isinstance(queue, list): continue
-        for item in queue:
-            if not isinstance(item, dict) or not item.get("fingerprint"): continue
-            key = str(item["fingerprint"])
-            old = records.get(key)
-            if old is None or stamp(item.get("updated_at")) >= stamp(old.get("updated_at")):
-                records[key] = item
-    return {"pending": sorted(records.values(), key=lambda x: (
-        str(x.get("date", "")), str(x.get("slot", "")), str(x.get("fingerprint", ""))
-    ))}
-
-
 def merge(path, local, remote):
     if path.endswith(".signal-state.json"):
         return signal_state(local, remote)
@@ -103,10 +67,6 @@ def merge(path, local, remote):
         return max((remote, local), key=lambda x: (
             stamp(x.get("finished_at")), stamp(x.get("started_at"))
         ))
-    if path.endswith(".bark-pending-notification-state.json"):
-        return pending_state(local, remote)
-    if path.endswith(".bark-notification-state.json") or path.endswith(".bark-watchdog-notification-state.json"):
-        return accepted_state(local, remote)
     return {**remote, **local}
 
 
