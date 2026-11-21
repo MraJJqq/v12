@@ -49,7 +49,10 @@ def _scan_delivery_state(api,run):
                 steps[name]=step.get("conclusion") or step.get("status")
     scan=steps.get("Scan Bitget history")
     bark=steps.get("Send Bark notification")
+    bark_state=steps.get("Persist Bark state")
     if scan=="success" and bark=="success":
+        if bark_state in ("failure","cancelled","timed_out","action_required"):
+            return "delivered_unpersisted"
         return "delivered"
     if scan=="success" and bark not in (None,"success"):
         return "bark_failed"
@@ -138,10 +141,12 @@ def main(now=None):
         delivery_state=_scan_delivery_state(api,latest)
         if delivery_state=="delivered":
             pending.append(f"Beijing {hour:02d}:00 scan and Bark delivery succeeded; recovery suppressed.")
+        elif delivery_state=="delivered_unpersisted":
+            # Delivery succeeded, so never rescan. Raise a health alert for state reconciliation.
+            problems.append(f"Beijing {hour:02d}:00 Bark accepted the notice, but GitHub Bark-state persistence failed; no rescan to avoid duplicate delivery.")
         elif delivery_state=="bark_failed":
-            # The scan itself completed. Bark retry owns notification recovery;
-            # launching another scan here could create a duplicate signal push.
-            pending.append(f"Beijing {hour:02d}:00 scan succeeded but Bark delivery failed; no rescan, defer to Bark retry.")
+            # Bark retry owns notification recovery; no scan retry is allowed.
+            problems.append(f"Beijing {hour:02d}:00 scan succeeded but Bark delivery failed; defer delivery recovery to Bark retry and alert for unresolved failures.")
         elif delivery_state=="scan_failed":
             if not is_recovery:
                 pending.append(_dispatch(api,issues,marker,slot))
