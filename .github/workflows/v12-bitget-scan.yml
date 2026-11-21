@@ -88,6 +88,7 @@ jobs:
           path: .cache/v12-candles
           key: v12-candle-cache-v2-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Persist signal state
+        id: persist_signal_state
         if: always() && steps.scan.outcome == 'success'
         run: bash tools/persist_v12_state.sh "chore(v12): persist signal state" v12/.signal-state.json v12/public-signals.json
       - name: Publish complete signal snapshot to Bark repository
